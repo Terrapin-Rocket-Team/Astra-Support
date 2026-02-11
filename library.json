@@ -12,8 +12,7 @@
   "platforms": "native",
   "build": {
     "includeDir": ".",
-    "srcDir": ".",
-    "extraScript": "scripts/pio_native_linkflags.py"
+    "srcDir": "."
   },
   "export": {
     "exclude": [

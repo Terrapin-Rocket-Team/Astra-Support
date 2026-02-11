@@ -35,7 +35,7 @@ jobs:
       - name: Install Astra Support CLI
         run: pipx install \"__SUPPORT_INSTALL__\"
       - name: Run Shared Test Runner
-        run: astra-support test --project . --no-progress
+        run: astra-support test --project . --no-progress --clean
 """
 
 DEFAULT_CONFIG = """version: 1
@@ -87,6 +87,8 @@ def _cmd_test(args: argparse.Namespace) -> int:
         forward.append("--no-builds")
     if args.no_tests:
         forward.append("--no-tests")
+    if args.clean:
+        forward.append("--clean")
     forward.extend(["--project", args.project])
     return run_tests.main(forward)
 
@@ -130,6 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_test.add_argument("--no-install", action="store_true")
     p_test.add_argument("--no-builds", action="store_true")
     p_test.add_argument("--no-tests", action="store_true")
+    p_test.add_argument("--clean", action="store_true")
     p_test.set_defaults(func=_cmd_test)
 
     p_hitl = sub.add_parser("hitl", help="Run shared HITL/SITL simulation harness")

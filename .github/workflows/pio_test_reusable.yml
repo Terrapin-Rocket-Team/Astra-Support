@@ -33,4 +33,4 @@ jobs:
       - name: Install Astra Support
         run: pipx install "${{ inputs.support-install }}"
       - name: Run tests
-        run: astra-support test --project "${{ inputs.project-path }}" --no-progress
+        run: astra-support test --project "${{ inputs.project-path }}" --no-progress --clean
