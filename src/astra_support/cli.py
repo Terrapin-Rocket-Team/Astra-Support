@@ -43,14 +43,6 @@ default_test_args:
   - --no-progress
 """
 
-DEFAULT_RUN_TESTS_WRAPPER = """#!/usr/bin/env python3
-import subprocess
-import sys
-
-cmd = [sys.executable, "-m", "astra_support", "test", "--project", "."] + sys.argv[1:]
-raise SystemExit(subprocess.call(cmd))
-"""
-
 
 def _ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -69,9 +61,6 @@ def _cmd_init(args: argparse.Namespace) -> int:
         raise FileNotFoundError(f"Project path does not exist: {project_root}")
 
     _write_text(project_root / ".astra-support.yml", DEFAULT_CONFIG, args.overwrite)
-
-    if args.write_wrapper:
-        _write_text(project_root / "run_tests.py", DEFAULT_RUN_TESTS_WRAPPER, args.overwrite)
 
     if args.write_workflow:
         workflow_content = DEFAULT_WORKFLOW.replace("__SUPPORT_INSTALL__", args.support_install)
@@ -121,7 +110,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_init = sub.add_parser("init", help="Initialize a repo with Astra Support config/workflow")
     p_init.add_argument("--project", default=".", help="Target repo path (default: .)")
     p_init.add_argument("--write-workflow", action="store_true", help="Write .github/workflows/run_unit_tests.yml")
-    p_init.add_argument("--write-wrapper", action="store_true", help="Write run_tests.py wrapper")
     p_init.add_argument("--overwrite", action="store_true", help="Overwrite existing generated files")
     p_init.add_argument(
         "--support-install",

@@ -17,13 +17,12 @@ pipx install "git+https://github.com/Terrapin-Rocket-Team/Astra-Support.git@main
 ## Initialize a Consumer Repo
 
 ```bash
-astra-support init --project . --write-workflow --write-wrapper
+astra-support init --project . --write-workflow
 ```
 
 This writes:
 - `.astra-support.yml`
 - `.github/workflows/run_unit_tests.yml`
-- `run_tests.py`
 
 ## Run Tests (consumer repo)
 

@@ -232,15 +232,17 @@ def parse_env_platforms(config_path: str = "platformio.ini") -> Dict[str, str]:
 def select_build_envs(envs: List[str]) -> List[str]:
     if not envs:
         return []
-    if sys.platform == "win32":
-        return [e for e in envs if e != "unix"]
-    return [e for e in envs if e != "native"]
+    if "native" in envs and "unix" in envs:
+        if sys.platform == "win32":
+            return [e for e in envs if e != "unix"]
+        return [e for e in envs if e != "native"]
+    return envs
 
 def select_test_env(envs: List[str]) -> Optional[str]:
-    if sys.platform != "win32" and "unix" in envs:
-        return "unix"
     if "native" in envs:
         return "native"
+    if "unix" in envs:
+        return "unix"
     return envs[0] if envs else None
 
 def select_platforms_for_envs(envs: List[str], env_platforms: Dict[str, str]) -> List[str]:
