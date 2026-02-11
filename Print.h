@@ -110,12 +110,16 @@ public:
         return println(buf);
     }
 
+    // Only define size_t overload if it's different from unsigned long
+    // On 64-bit Linux, size_t == unsigned long, causing duplicate overload
+#if !((defined(__linux__) || defined(__APPLE__)) && defined(__LP64__))
     size_t println(size_t i)
     {
         char buf[32];
         snprintf(buf, sizeof(buf), "%zu", i);
         return println(buf);
     }
+#endif
 
     // FlashStringHelper support - on native, flash strings are just regular const char*
     size_t print(const void *flashStr) {

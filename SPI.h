@@ -1,5 +1,8 @@
 #ifndef MOCK_SPI_H
 #define MOCK_SPI_H
+#if (defined(__linux__) || defined(__APPLE__)) && defined(__LP64__)
+#include <cstddef>
+#endif
 
 #include <cstdint>
 

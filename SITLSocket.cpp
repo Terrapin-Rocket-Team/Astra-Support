@@ -1,6 +1,8 @@
 #include "SITLSocket.h"
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
+#include <thread>
 
 // Platform-specific includes
 #ifdef _WIN32
@@ -66,26 +68,30 @@ SITLSocket::~SITLSocket()
     disconnect();
 }
 
-bool SITLSocket::connect(const char* host, int port)
+bool SITLSocket::connect(const char *host, int port)
 {
-    if (connected) {
+    if (connected)
+    {
         disconnect();
     }
 
-    if (!initializeSockets()) {
+    if (!initializeSockets())
+    {
         return false;
     }
 
     // Create socket
     socketFd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (socketFd == INVALID_SOCKET_VALUE) {
+    if (socketFd == INVALID_SOCKET_VALUE)
+    {
         fprintf(stderr, "SITL: Failed to create socket: %d\n", SOCKET_ERROR_CODE);
         return false;
     }
 
     // Resolve hostname
-    struct hostent* server = gethostbyname(host);
-    if (server == nullptr) {
+    struct hostent *server = gethostbyname(host);
+    if (server == nullptr)
+    {
         fprintf(stderr, "SITL: Failed to resolve host '%s': %d\n", host, SOCKET_ERROR_CODE);
         CLOSE_SOCKET(socketFd);
         socketFd = INVALID_SOCKET_VALUE;
@@ -99,13 +105,39 @@ bool SITLSocket::connect(const char* host, int port)
     memcpy(&serverAddr.sin_addr.s_addr, server->h_addr, server->h_length);
     serverAddr.sin_port = htons(port);
 
-    // Connect to server
-    if (::connect(socketFd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
-        fprintf(stderr, "SITL: Failed to connect to %s:%d: %d\n", host, port, SOCKET_ERROR_CODE);
-        CLOSE_SOCKET(socketFd);
-        socketFd = INVALID_SOCKET_VALUE;
-        return false;
+    // --- NEW RETRY LOGIC ---
+    printf("SITL: Attempting to connect to simulator at %s:%d...\n", host, port);
+
+    while (true)
+    {
+        if (::connect(socketFd, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) != SOCKET_ERROR)
+        {
+            // Success!
+            break;
+        }
+
+        // Check if we failed for a reason other than "server not ready"
+        // On Linux/Mac: ECONNREFUSED; On Windows: WSAECONNREFUSED
+#ifdef _WIN32
+        int err = WSAGetLastError();
+        bool wouldRetry = (err == WSAECONNREFUSED);
+#else
+        int err = errno;
+        bool wouldRetry = (err == ECONNREFUSED);
+#endif
+
+        if (!wouldRetry)
+        {
+            fprintf(stderr, "SITL: Fatal connection error: %d\n", err);
+            CLOSE_SOCKET(socketFd);
+            socketFd = INVALID_SOCKET_VALUE;
+            return false;
+        }
+
+        // Wait 500ms before trying again to avoid pegging the CPU
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
+    // --- END RETRY LOGIC ---
 
     // Set non-blocking mode for reads
 #ifdef _WIN32
@@ -143,6 +175,9 @@ void SITLSocket::disconnect()
         CLOSE_SOCKET(socketFd);
         socketFd = INVALID_SOCKET_VALUE;
     }
+#ifndef PIO_UNIT_TESTING
+    std::exit(0);
+#endif
     connected = false;
 }
 
@@ -211,6 +246,9 @@ int SITLSocket::read(uint8_t* buffer, size_t maxLen)
         // Connection closed by peer
         fprintf(stderr, "SITL: Connection closed by simulator\n");
         disconnect();
+#ifndef PIO_UNIT_TESTING
+        std::exit(0);
+#endif
         return -1;
     }
 

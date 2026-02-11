@@ -24,6 +24,14 @@
 
 #define INPUT 1
 #define OUTPUT 0
+#define INPUT_PULLUP 2
+#define INPUT_PULLDOWN 3
+
+// Platform ADC configuration for testing
+#define PLATFORM_ADC_BITS 10
+#define PLATFORM_DEFAULT_REF_VOLTAGE 3.3
+
+#define A0 0
 
 #define LED_BUILTIN 13
 #define BUILTIN_SDCARD 254
@@ -116,6 +124,10 @@ void pinMode(int pin, int mode);
 
 int analogRead(int pin);
 
+// Mock helpers for testing
+void setMockAnalogRead(int pin, int value);
+void clearMockAnalogReads();
+
 #ifdef __cplusplus
 
 // Forward declaration for SITL support
@@ -191,6 +203,8 @@ public:
 class Stream : public Print
 {
 public:
+    Stream() = default;
+    ~Stream();
     void begin(int baud = 9600);
     void end();
     void clearBuffer();
@@ -221,10 +235,21 @@ public:
 
     String readStringUntil(char terminator) {
         String ret = "";
-        int c = read();
-        while (c >= 0 && c != terminator) {
+        unsigned long startTime = millis();
+        const unsigned long timeout = 1000; // 1 second timeout
+
+        while (millis() - startTime < timeout) {
+            int c = read();
+            if (c < 0) {
+                // No data available - yield and try again
+                std::this_thread::sleep_for(std::chrono::microseconds(100));
+                continue;
+            }
+            if (c == terminator) {
+                // Found terminator - success
+                break;
+            }
             ret += (char)c;
-            c = read();
         }
         return ret;
     }
@@ -251,15 +276,21 @@ private:
     void pollSITLInput();  // Poll for incoming data from simulator
 };
 
+
+
 class SerialClass : public Stream
 {
 public:
 };
+class HardwareSerial : public SerialClass
+{
+public:
+};
 
-extern SerialClass Serial;
-extern SerialClass Serial1;
-extern SerialClass Serial2;
-extern SerialClass Serial3;
+extern HardwareSerial Serial;
+extern HardwareSerial Serial1;
+extern HardwareSerial Serial2;
+extern HardwareSerial Serial3;
 
 class CrashReportClass
 {

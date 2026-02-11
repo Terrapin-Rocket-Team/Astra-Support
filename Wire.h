@@ -2,6 +2,9 @@
 #define MOCK_WIRE_H
 
 #ifdef __cplusplus
+#if (defined(__linux__) || defined(__APPLE__)) && defined(__LP64__)
+#include <cstddef>
+#endif
 #include <cstdint>
 #else
 #include <stdint.h>
