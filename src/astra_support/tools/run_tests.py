@@ -353,9 +353,13 @@ def main(argv=None):
         return 2
 
     envs = list_platformio_envs(config_path)
+    print(f"found {len(envs)} PlatformIO environments: {envs}")
     build_envs = select_build_envs(envs)
+    print(f"selected {len(build_envs)} build environments: {build_envs}")
     env_platforms = parse_env_platforms(config_path)
+    print(f"env platforms: {env_platforms}")
     platforms_to_install = select_platforms_for_envs(build_envs, env_platforms)
+    print(f"platforms to install: {platforms_to_install}")
     install_results: List[PlatformInstallResult] = []
     build_results: List[BuildResult] = []
 
