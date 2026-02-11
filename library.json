@@ -1,0 +1,27 @@
+{
+  "name": "AstraSupportNativeMocks",
+  "version": "0.1.0",
+  "description": "Native mocks/shims used by Astra-based libraries for PlatformIO native testing.",
+  "keywords": "Astra, native, mocks, PlatformIO",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Terrapin-Rocket-Team/Astra-Support.git"
+  },
+  "license": "MIT",
+  "frameworks": "*",
+  "platforms": "native",
+  "build": {
+    "includeDir": ".",
+    "srcDir": ".",
+    "extraScript": "scripts/pio_native_linkflags.py"
+  },
+  "export": {
+    "exclude": [
+      ".github",
+      "docs",
+      "flight-data",
+      "src/astra_support",
+      "pyproject.toml"
+    ]
+  }
+}

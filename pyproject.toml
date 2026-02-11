@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astra-support"
+version = "0.1.0"
+description = "Shared support tooling for Astra-based libraries"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Terrapin Rocket Team" }
+]
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+sim = [
+  "numpy>=1.21",
+  "scipy>=1.7",
+  "pyserial>=3.5",
+  "matplotlib>=3.5"
+]
+
+[project.scripts]
+astra-support = "astra_support.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

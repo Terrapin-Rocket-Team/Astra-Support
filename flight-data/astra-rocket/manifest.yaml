@@ -1,0 +1,24 @@
+version: 1
+datasets:
+  - id: fmmork
+    path: raw/FMMORK.csv
+    source: OpenRocket export
+    notes: Baseline ORK profile used in HITL.
+  - id: fmmork2
+    path: raw/FMMORK2.csv
+    source: OpenRocket export
+  - id: nyxork
+    path: raw/NyxORK.csv
+    source: OpenRocket export
+  - id: br_hr_jan
+    path: raw/BR_HR_JAN.csv
+    source: Flight/sim data
+  - id: br_lr_jan
+    path: raw/BR_LR_JAN.csv
+    source: Flight/sim data
+  - id: data_160
+    path: raw/data_160.csv
+    source: Flight/sim data
+  - id: data_160_trimmed
+    path: raw/data_160_trimmed.csv
+    source: Flight/sim data
