@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from . import __version__
+from .self_update import maybe_prompt_for_update
 
 DEFAULT_WORKFLOW = """name: Run Unit Tests
 
@@ -104,6 +105,11 @@ def _cmd_hitl(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="astra-support", description="Shared tooling for Astra-based repos")
     parser.add_argument("--version", action="version", version=f"astra-support {__version__}")
+    parser.add_argument(
+        "--no-update-check",
+        action="store_true",
+        help="Skip interactive CLI update checks for this invocation.",
+    )
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -137,4 +143,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if maybe_prompt_for_update(no_update_check=args.no_update_check):
+        return 0
     return int(args.func(args))

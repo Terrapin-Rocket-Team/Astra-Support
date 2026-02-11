@@ -34,6 +34,15 @@ astra-support test --project .
 
 ```bash
 astra-support hitl --project . -- --mode sitl --source physics
+
+## CLI Self-Update Prompt
+
+When run interactively, `astra-support` checks periodically for updates and can
+prompt to install them before continuing.
+
+- Skip once: `astra-support --no-update-check ...`
+- Disable globally: set `ASTRA_SUPPORT_DISABLE_UPDATE_CHECK=1`
+- Change check interval (seconds): `ASTRA_SUPPORT_UPDATE_CHECK_INTERVAL_SECONDS`
 ```
 
 ## Use Native Mocks as PlatformIO dependency
