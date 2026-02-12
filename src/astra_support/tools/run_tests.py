@@ -17,19 +17,22 @@ TEST_DIR = os.path.join(PROJECT_ROOT, "test")
 PARALLEL_BUILD_BASE = os.path.join(PROJECT_ROOT, ".pio", "build_parallel")
 
 # ANSI Colors
-BS = "\033[1m"
-R = "\033[91m"
-G = "\033[92m"
-Y = "\033[93m"
-M = "\033[95m"
-C = "\033[96m"
-NC = "\033[0m"
+BS = "\033[1m"       # Bold
+DIM = "\033[2m"      # Dim
+R = "\033[91m"       # Red   – test assertion failures
+G = "\033[92m"       # Green – success
+Y = "\033[93m"       # Yellow – warnings / retries
+M = "\033[95m"       # Magenta – system/crash errors
+C = "\033[96m"       # Cyan – informational / secondary
+NC = "\033[0m"       # Reset
 
 # Status Categories
 STATUS_PASS = "PASS"
 STATUS_TEST_FAIL = "TEST_FAIL"
 STATUS_COMPILE_ERR = "COMPILE_ERR"
 STATUS_SYSTEM_ERR = "SYSTEM_ERR"
+
+W = 50  # summary separator width
 
 
 def configure_console_output() -> None:
@@ -180,22 +183,25 @@ class ProgressReporter:
         return f"{minutes:02d}:{seconds:02d}"
 
     @staticmethod
-    def _bar(done: float, total: float, width: int = 30) -> str:
+    def _bar(done: float, total: float, width: int = 28) -> str:
         total = max(1.0, float(total))
         done = min(total, max(0.0, float(done)))
         ratio = done / total
         filled = int(width * ratio)
-        return f"[{'=' * filled}{'-' * (width - filled)}] {int(ratio * 100):3d}% ({int(done)}/{int(total)})"
+        bar = "=" * filled + "-" * (width - filled)
+        return f"[{bar}] {int(ratio * 100):3d}% ({int(done)}/{int(total)})"
 
     def _render_unlocked(self) -> None:
         active_task = self.completed_phases + (1 if self.phase_active else 0)
         active_task = min(self.total_phases, active_task)
         line = (
-            f"Stage {self.stage_name:<10} "
-            f"{self._bar(self.stage_done, self.stage_total)} | "
-            f"Tasks {active_task}/{self.total_phases} | "
-            f"Elapsed {self._elapsed_str()}"
+            f"  {self.stage_name:<8} "
+            f"{self._bar(self.stage_done, self.stage_total)} "
+            f"| task {active_task}/{self.total_phases} "
+            f"| {self._elapsed_str()}"
         )
+        # Track the full written width so _clear_unlocked erases everything
+        full_len = max(len(line), self._last_line_len)
         padding = " " * max(0, self._last_line_len - len(line))
         sys.stdout.write("\r")
         sys.stdout.write(line)
@@ -203,7 +209,7 @@ class ProgressReporter:
             sys.stdout.write(padding)
         sys.stdout.flush()
         self._visible = True
-        self._last_line_len = len(line)
+        self._last_line_len = full_len
 
 
 def _retry_delay_seconds(attempt_number: int) -> float:
@@ -267,7 +273,6 @@ def parse_test_counts(log_text: str) -> Tuple[Optional[int], Optional[int], Opti
                 except ValueError:
                     pass
         if " test cases:" in line_strip and ("failed" in line_strip or "succeeded" in line_strip):
-            # Example: "102 test cases: 1 failed, 101 succeeded in 00:00:12.171"
             left, right = line_strip.split(" test cases:", 1)
             num = ""
             for ch in left:
@@ -468,6 +473,10 @@ def run_test_folder(folder_name: str, test_env: str) -> TestResult:
         return TestResult(folder_name, STATUS_SYSTEM_ERR, -1, str(e), 0)
 
 
+def _sep(char: str = "-") -> str:
+    return char * W
+
+
 def main(argv=None):
     global PROJECT_ROOT
     global TEST_DIR
@@ -510,6 +519,17 @@ def main(argv=None):
     platforms_to_install = select_platforms_for_envs(build_envs, env_platforms)
     test_env = select_test_env(envs)
     clean_envs = build_envs if build_envs else envs
+
+    # --- Print discovered environments ---
+    if envs:
+        print(f"{BS}Environments ({len(build_envs)} active):{NC}  " + "  ".join(
+            f"{G}{e}{NC}" if e in build_envs else f"{DIM}{e}{NC}" for e in envs
+        ))
+        if test_env:
+            print(f"{DIM}Test env: {test_env}{NC}")
+        print()
+    else:
+        print(f"{Y}⚠️  No PlatformIO environments found in {config_path}.{NC}\n")
 
     test_folders: List[str] = []
     tests_skipped_reason: Optional[str] = None
@@ -555,14 +575,15 @@ def main(argv=None):
     total_tests = len(test_folders)
 
     try:
+        # ── CLEAN ─────────────────────────────────────────────────────────────
         if args.clean:
             progress.set_stage("clean", max(1, len(clean_envs)))
             if clean_envs:
                 worker_count = min(MAX_WORKERS, len(clean_envs))
                 progress.write(
-                    f"{BS}🧹 --clean enabled: refreshing dependencies for {len(clean_envs)} environment(s).{NC}"
+                    f"{BS}🧹 Refreshing dependencies for {len(clean_envs)} environment(s){NC}"
                 )
-                progress.write(f"{C}Using {worker_count} workers for dependency refresh.{NC}")
+                progress.write(f"{DIM}  {worker_count} workers{NC}")
                 clean_start_time = time.time()
                 with ThreadPoolExecutor(max_workers=worker_count) as executor:
                     retries: Dict[str, int] = {name: 0 for name in clean_envs}
@@ -588,7 +609,7 @@ def main(argv=None):
                             if res.status == STATUS_SYSTEM_ERR and retries[env_name] < MAX_RETRIES:
                                 retries[env_name] += 1
                                 progress.write(
-                                    f"{M}⚠️  Retry {retries[env_name]}/{MAX_RETRIES} (System Flake): clean {env_name}{NC}"
+                                    f"{Y}  ⚠  Retry {retries[env_name]}/{MAX_RETRIES}: clean {env_name}{NC}"
                                 )
                                 time.sleep(_retry_delay_seconds(retries[env_name]))
                                 pending.append(env_name)
@@ -597,9 +618,9 @@ def main(argv=None):
                             clean_results.append(res)
                             progress.advance_stage()
                             if res.status == STATUS_PASS:
-                                progress.write(f"{G}✅ CLEAN OK: {res.name} ({res.duration:.1f}s){NC}")
+                                progress.write(f"{G}  ✔  clean {res.name}{NC}  {DIM}({res.duration:.1f}s){NC}")
                             else:
-                                progress.write(f"{M}☠️  CLEAN FAIL: {res.name} ({res.duration:.1f}s){NC}")
+                                progress.write(f"{M}  ✘  clean {res.name}{NC}  {DIM}({res.duration:.1f}s){NC}")
                                 if res.log:
                                     progress.write(res.log)
                 clean_duration = time.time() - clean_start_time
@@ -607,28 +628,29 @@ def main(argv=None):
                 clean_failed = clean_failed_count > 0
                 if clean_failed:
                     clean_note = (
-                        f"{M}☠️  CLEAN FAIL: {clean_failed_count}/{len(clean_results)} environment(s) failed "
-                        f"dependency refresh.{NC}"
+                        f"{M}  ✘  {clean_failed_count}/{len(clean_results)} environment(s) failed "
+                        f"dependency refresh{NC}"
                     )
                 else:
                     clean_note = (
-                        f"{G}✅ CLEAN OK: Refreshed dependencies for {len(clean_results)} environment(s) "
-                        f"in {clean_duration:.2f}s.{NC}"
+                        f"{G}  ✔  Refreshed {len(clean_results)} environment(s) "
+                        f"in {clean_duration:.2f}s{NC}"
                     )
             else:
-                clean_note = f"{Y}⚠️  CLEAN SKIP: No PlatformIO environments found for dependency refresh.{NC}"
+                clean_note = f"{Y}  ⚠  No environments found for dependency refresh{NC}"
                 progress.advance_stage()
             progress.complete_stage()
             progress.write(clean_note)
 
+        # ── PLATFORM INSTALL ──────────────────────────────────────────────────
         if args.no_install:
-            print(f"{Y}⚠️  Platform install stage skipped (--no-install).{NC}")
+            print(f"{Y}  ⚠  Platform install skipped (--no-install){NC}")
         else:
             progress.set_stage("install", max(1, len(platforms_to_install)))
             if platforms_to_install:
                 worker_count = min(MAX_WORKERS, len(platforms_to_install))
-                progress.write(f"{BS}📦 Installing {len(platforms_to_install)} PlatformIO platforms{NC}")
-                progress.write(f"{C}Using {worker_count} workers for platform installs.{NC}")
+                progress.write(f"\n{BS}📦 Installing {len(platforms_to_install)} PlatformIO platform(s){NC}")
+                progress.write(f"{DIM}  {worker_count} workers{NC}")
                 install_start_time = time.time()
                 with ThreadPoolExecutor(max_workers=worker_count) as executor:
                     retries: Dict[str, int] = {name: 0 for name in platforms_to_install}
@@ -654,7 +676,7 @@ def main(argv=None):
                             if res.status == STATUS_SYSTEM_ERR and retries[platform] < MAX_RETRIES:
                                 retries[platform] += 1
                                 progress.write(
-                                    f"{M}⚠️  Retry {retries[platform]}/{MAX_RETRIES} (System Flake): platform {platform}{NC}"
+                                    f"{Y}  ⚠  Retry {retries[platform]}/{MAX_RETRIES}: platform {platform}{NC}"
                                 )
                                 time.sleep(_retry_delay_seconds(retries[platform]))
                                 pending.append(platform)
@@ -663,13 +685,13 @@ def main(argv=None):
                             install_results.append(res)
                             progress.advance_stage()
                             if res.status == STATUS_PASS:
-                                progress.write(f"{G}✅ PLATFORM OK: {res.name} ({res.duration:.1f}s){NC}")
+                                progress.write(f"{G}  ✔  {res.name}{NC}  {DIM}({res.duration:.1f}s){NC}")
                             else:
-                                progress.write(f"{M}☠️  PLATFORM FAIL: {res.name} ({res.duration:.1f}s){NC}")
+                                progress.write(f"{M}  ✘  {res.name}{NC}  {DIM}({res.duration:.1f}s){NC}")
                                 if res.log:
                                     progress.write(res.log)
                 install_duration = time.time() - install_start_time
-                progress.write(f"{BS}Platform installs complete in {install_duration:.2f}s{NC}")
+                progress.write(f"{DIM}  done in {install_duration:.2f}s{NC}")
 
                 failed_platforms = {r.name for r in install_results if r.status != STATUS_PASS}
                 if failed_platforms:
@@ -678,24 +700,25 @@ def main(argv=None):
                     skipped = before_count - len(build_envs)
                     if skipped > 0:
                         progress.write(
-                            f"{Y}⚠️  Skipping {skipped} build env(s) due to failed platform install(s).{NC}"
+                            f"{Y}  ⚠  Skipping {skipped} build env(s) due to failed platform install(s){NC}"
                         )
             else:
                 if envs:
-                    progress.write(f"{Y}⚠️  No compatible build platforms found. Skipping installs.{NC}")
+                    progress.write(f"{Y}  ⚠  No compatible build platforms found — skipping installs{NC}")
                 else:
-                    progress.write(f"{Y}⚠️  No PlatformIO environments found. Skipping installs.{NC}")
+                    progress.write(f"{Y}  ⚠  No PlatformIO environments found — skipping installs{NC}")
                 progress.advance_stage()
             progress.complete_stage()
 
+        # ── BUILD ──────────────────────────────────────────────────────────────
         if args.no_builds:
-            print(f"{Y}⚠️  Build stage skipped (--no-builds).{NC}")
+            print(f"{Y}  ⚠  Build stage skipped (--no-builds){NC}")
         else:
             progress.set_stage("build", max(1, len(build_envs)))
             if build_envs:
                 worker_count = min(MAX_WORKERS, len(build_envs))
-                progress.write(f"{BS}🔨 Building {len(build_envs)} environments{NC}")
-                progress.write(f"{C}Using {worker_count} workers for environment builds.{NC}")
+                progress.write(f"\n{BS}🔨 Building {len(build_envs)} environment(s){NC}")
+                progress.write(f"{DIM}  {worker_count} workers{NC}")
                 build_start_time = time.time()
                 with ThreadPoolExecutor(max_workers=worker_count) as executor:
                     retries: Dict[str, int] = {name: 0 for name in build_envs}
@@ -721,7 +744,7 @@ def main(argv=None):
                             if res.status == STATUS_SYSTEM_ERR and retries[env_name] < MAX_RETRIES:
                                 retries[env_name] += 1
                                 progress.write(
-                                    f"{M}⚠️  Retry {retries[env_name]}/{MAX_RETRIES} (System Flake): build {env_name}{NC}"
+                                    f"{Y}  ⚠  Retry {retries[env_name]}/{MAX_RETRIES}: build {env_name}{NC}"
                                 )
                                 time.sleep(_retry_delay_seconds(retries[env_name]))
                                 pending.append(env_name)
@@ -730,39 +753,38 @@ def main(argv=None):
                             build_results.append(res)
                             progress.advance_stage()
                             if res.status == STATUS_PASS:
-                                progress.write(f"{G}✅ BUILD OK: {res.name} ({res.duration:.1f}s){NC}")
+                                progress.write(f"{G}  ✔  {res.name}{NC}  {DIM}({res.duration:.1f}s){NC}")
                             elif res.status == STATUS_COMPILE_ERR:
-                                progress.write(f"{Y}💥 BUILD FAIL: {res.name} ({res.duration:.1f}s){NC}")
+                                progress.write(f"{Y}  ✘  {res.name}  (build error){NC}  {DIM}({res.duration:.1f}s){NC}")
                                 if res.log:
                                     progress.write(res.log)
                             else:
-                                progress.write(f"{M}☠️  BUILD CRASH: {res.name} ({res.duration:.1f}s){NC}")
+                                progress.write(f"{M}  ✘  {res.name}  (system crash){NC}  {DIM}({res.duration:.1f}s){NC}")
                                 if res.log:
                                     progress.write(res.log)
                 build_duration = time.time() - build_start_time
-                progress.write(f"{BS}Builds complete in {build_duration:.2f}s{NC}")
+                progress.write(f"{DIM}  done in {build_duration:.2f}s{NC}")
             else:
                 if envs:
-                    progress.write(f"{Y}⚠️  No compatible build environments for this platform. Skipping builds.{NC}")
+                    progress.write(f"{Y}  ⚠  No compatible build environments for this platform — skipping{NC}")
                 else:
-                    progress.write(f"{Y}⚠️  No PlatformIO environments found. Skipping builds.{NC}")
+                    progress.write(f"{Y}  ⚠  No PlatformIO environments found — skipping builds{NC}")
                 progress.advance_stage()
             progress.complete_stage()
 
+        # ── TESTS ──────────────────────────────────────────────────────────────
         if args.no_tests:
-            print(f"{Y}⚠️  Test stage skipped (--no-tests).{NC}")
+            print(f"{Y}  ⚠  Test stage skipped (--no-tests){NC}")
         else:
             progress.set_stage("test", max(1, total_tests))
             if tests_skipped_reason:
-                progress.write(f"{Y}Tests skipped: {tests_skipped_reason}{NC}")
+                progress.write(f"{Y}  ⚠  Tests skipped: {tests_skipped_reason}{NC}")
                 progress.advance_stage()
                 progress.complete_stage()
             else:
                 worker_count = min(MAX_WORKERS, total_tests)
-                progress.write(f"{C}🧪 Test env: {test_env}{NC}")
-                progress.write(
-                    f"{BS}🚀 Queueing {total_tests} suites on {test_env} using {worker_count} workers{NC}"
-                )
+                progress.write(f"\n{BS}🧪 Testing on {test_env} — {total_tests} suite(s){NC}")
+                progress.write(f"{DIM}  {worker_count} workers{NC}")
                 stage_start = time.time()
                 retries: Dict[str, int] = {name: 0 for name in test_folders}
                 pending = deque(test_folders)
@@ -791,7 +813,7 @@ def main(argv=None):
                                 if res.status == STATUS_SYSTEM_ERR and retries[folder] < MAX_RETRIES:
                                     retries[folder] += 1
                                     progress.write(
-                                        f"{M}⚠️  Retry {retries[folder]}/{MAX_RETRIES} (System Flake): {folder}{NC}"
+                                        f"{Y}  ⚠  Retry {retries[folder]}/{MAX_RETRIES}: {folder}{NC}"
                                     )
                                     time.sleep(_retry_delay_seconds(retries[folder]))
                                     pending.append(folder)
@@ -799,135 +821,155 @@ def main(argv=None):
 
                                 test_results[folder] = res
                                 progress.advance_stage()
-                                count_str = f" [{res.test_count} cases]" if res.test_count is not None else ""
+                                count_str = f"  {DIM}[{res.test_count} cases]{NC}" if res.test_count is not None else ""
+                                dur_str = f"  {DIM}({res.duration:.1f}s){NC}"
                                 if res.status == STATUS_PASS:
                                     progress.write(
-                                        f"{G}✅ PASS: {res.name}{count_str} ({res.duration:.1f}s){NC}"
+                                        f"{G}  ✔  {res.name}{NC}{count_str}{dur_str}"
                                     )
                                 elif res.status == STATUS_TEST_FAIL:
-                                    progress.write(f"{R}❌ FAIL: {res.name}{count_str}{NC}")
+                                    progress.write(f"{R}  ✘  {res.name}  (test failure){NC}{count_str}{dur_str}")
                                     if res.log:
                                         progress.write(res.log)
                                 elif res.status == STATUS_COMPILE_ERR:
                                     progress.write(
-                                        f"{Y}💥 ERR : {res.name}{count_str} (Build Failed){NC}"
+                                        f"{Y}  ✘  {res.name}  (build failed){NC}{count_str}{dur_str}"
                                     )
                                     if res.log:
                                         progress.write(res.log)
                                 else:
                                     progress.write(
-                                        f"{M}☠️  CRASH: {res.name}{count_str} (System Error){NC}"
+                                        f"{M}  ✘  {res.name}  (system crash){NC}{count_str}{dur_str}"
                                     )
                                     if res.log:
                                         progress.write(res.log)
                 except KeyboardInterrupt:
                     progress.stop()
-                    print(f"\n{R}🛑 EXECUTION CANCELLED BY USER.{NC}")
+                    print(f"\n{R}🛑 Cancelled.{NC}")
                     return 1
 
                 test_duration = time.time() - stage_start
-                progress.write(f"{BS}Test suites complete in {test_duration:.2f}s{NC}")
+                progress.write(f"{DIM}  done in {test_duration:.2f}s{NC}")
                 progress.complete_stage()
     finally:
         progress.stop()
 
-    # --- SUMMARY ---
-    print("\n" + "=" * 50)
-    print(f"{BS}RUN COMPLETE{NC}")
-    print("=" * 50)
+    total_elapsed = time.time() - run_start_time
+    elapsed_m, elapsed_s = divmod(int(total_elapsed), 60)
+    elapsed_str = f"{elapsed_m}m {elapsed_s}s" if elapsed_m else f"{elapsed_s}s"
 
+    # ── SUMMARY ────────────────────────────────────────────────────────────────
+    print(f"\n{_sep('═')}")
+    print(f"{BS}  RESULTS{NC}  {DIM}({elapsed_str}){NC}")
+    print(_sep("─"))
+
+    # Clean
     if args.clean:
-        print(f"{BS}Clean Step{NC}")
-        print(clean_note)
+        print(f"{BS}  Clean{NC}")
+        print(f"  {clean_note}")
         clean_failed_results = [r for r in clean_results if r.status != STATUS_PASS]
         if clean_failed_results:
-            print(f"{M}Failed ({len(clean_failed_results)}):{NC}")
             for r in clean_failed_results:
-                print(f"  ☠️  {r.name}")
-        print("-" * 50)
+                print(f"{M}    ✘  {r.name}{NC}")
+        print(_sep("─"))
 
-    install_failed = [r for r in install_results if r.status != STATUS_PASS]
+    # Platform installs
     if install_results:
-        print(f"{BS}Platform Install Results{NC}")
+        install_failed = [r for r in install_results if r.status != STATUS_PASS]
+        print(f"{BS}  Platforms{NC}")
         if not install_failed:
-            print(f"{G}All platforms installed successfully.{NC}")
+            print(f"{G}  ✔  All {len(install_results)} platform(s) installed{NC}")
         else:
-            print(f"{M}Failed ({len(install_failed)}):{NC}")
+            print(f"{G}  Installed ({len(install_results) - len(install_failed)}):{NC}")
+            for r in [r for r in install_results if r.status == STATUS_PASS]:
+                print(f"    ✔  {r.name}")
+            print(f"{M}  Failed ({len(install_failed)}):{NC}")
             for r in install_failed:
-                print(f"  ☠️  {r.name}")
-        print("-" * 50)
+                print(f"    ✘  {r.name}")
+        print(_sep("─"))
 
-    build_passed = [r for r in build_results if r.status == STATUS_PASS]
-    build_failed = [r for r in build_results if r.status != STATUS_PASS]
-    build_broken = [r for r in build_results if r.status == STATUS_COMPILE_ERR]
-    build_crashed = [r for r in build_results if r.status == STATUS_SYSTEM_ERR]
-
+    # Builds
     if build_results:
-        print(f"{BS}Build Results{NC}")
+        build_passed = [r for r in build_results if r.status == STATUS_PASS]
+        build_broken = [r for r in build_results if r.status == STATUS_COMPILE_ERR]
+        build_crashed = [r for r in build_results if r.status == STATUS_SYSTEM_ERR]
+        print(f"{BS}  Builds{NC}")
         if build_passed:
-            print(f"{G}Passing ({len(build_passed)}):{NC}")
+            print(f"{G}  Passing ({len(build_passed)}):{NC}")
             for r in build_passed:
-                print(f"  ✅ {r.name}")
+                print(f"    ✔  {r.name}")
         if build_broken:
-            print(f"\n{Y}Build Errors ({len(build_broken)}) - [Syntax/Linker]:{NC}")
+            print(f"{Y}  Build errors ({len(build_broken)}):{NC}")
             for r in build_broken:
-                print(f"  💥 {r.name}")
+                print(f"    ✘  {r.name}")
         if build_crashed:
-            print(f"\n{M}System Crashes ({len(build_crashed)}) - [OS/Locking Issues]:{NC}")
+            print(f"{M}  System crashes ({len(build_crashed)}):{NC}")
             for r in build_crashed:
-                print(f"  ☠️  {r.name}")
-        if test_env and not args.no_tests:
-            print("-" * 50)
-    else:
-        print(f"{Y}No build results to report.{NC}")
+                print(f"    ✘  {r.name}")
+        print(_sep("─"))
+    elif not args.no_builds:
+        print(f"{Y}  No build results.{NC}")
+        print(_sep("─"))
 
-    test_passed = [r for r in test_results.values() if r.status == STATUS_PASS]
-    test_failed = [r for r in test_results.values() if r.status == STATUS_TEST_FAIL]
-    test_broken = [r for r in test_results.values() if r.status == STATUS_COMPILE_ERR]
-    test_crashed = [r for r in test_results.values() if r.status == STATUS_SYSTEM_ERR]
-
-    total_test_cases = sum(r.test_count or 0 for r in test_results.values())
-    total_passed_cases = sum(r.passed_count or 0 for r in test_results.values())
-    total_failed_cases = sum(r.failed_count or 0 for r in test_results.values())
-
+    # Tests
     if tests_skipped_reason:
-        print(f"{Y}Tests skipped: {tests_skipped_reason}{NC}")
+        print(f"{Y}  Tests skipped: {tests_skipped_reason}{NC}")
     elif test_results:
-        print(f"{BS}Test Results (env: {test_env}, {total_tests} suites, {test_duration:.2f}s){NC}")
+        test_passed = [r for r in test_results.values() if r.status == STATUS_PASS]
+        test_failed = [r for r in test_results.values() if r.status == STATUS_TEST_FAIL]
+        test_broken = [r for r in test_results.values() if r.status == STATUS_COMPILE_ERR]
+        test_crashed = [r for r in test_results.values() if r.status == STATUS_SYSTEM_ERR]
+
+        total_test_cases = sum(r.test_count or 0 for r in test_results.values())
+        total_passed_cases = sum(r.passed_count or 0 for r in test_results.values())
+        total_failed_cases = sum(r.failed_count or 0 for r in test_results.values())
+
+        print(f"{BS}  Tests{NC}  {DIM}(env: {test_env}, {total_tests} suites, {test_duration:.2f}s){NC}")
         if test_passed:
-            print(f"{G}Passing ({len(test_passed)}):{NC}")
+            print(f"{G}  Passing ({len(test_passed)}):{NC}")
             for r in test_passed:
-                print(f"  ✅ {r.name}")
+                cases = f"  {DIM}[{r.test_count}]{NC}" if r.test_count is not None else ""
+                print(f"    ✔  {r.name}{cases}")
         if test_failed:
-            print(f"\n{R}Test Failures ({len(test_failed)}) - [Logic/Assertions]:{NC}")
+            print(f"{R}  Test failures ({len(test_failed)}):{NC}")
             for r in test_failed:
-                print(f"  ❌ {r.name}")
+                print(f"    ✘  {r.name}")
         if test_broken:
-            print(f"\n{Y}Build Errors ({len(test_broken)}) - [Syntax/Linker]:{NC}")
+            print(f"{Y}  Build errors ({len(test_broken)}):{NC}")
             for r in test_broken:
-                print(f"  💥 {r.name}")
+                print(f"    ✘  {r.name}")
         if test_crashed:
-            print(f"\n{M}System Crashes ({len(test_crashed)}) - [OS/Locking Issues]:{NC}")
+            print(f"{M}  System crashes ({len(test_crashed)}):{NC}")
             for r in test_crashed:
-                print(f"  ☠️  {r.name}")
+                print(f"    ✘  {r.name}")
 
-        print("\n" + "-" * 50)
-        print(f"{BS}Test Case Totals{NC}")
-        print(f"  Total: {total_test_cases}")
-        print(f"  Passed: {total_passed_cases}")
-        print(f"  Failed: {total_failed_cases}")
+        print(_sep("─"))
+        if total_test_cases > 0:
+            fail_color = R if total_failed_cases > 0 else G
+            print(
+                f"  {G}{total_passed_cases} passed{NC}  "
+                f"{fail_color}{total_failed_cases} failed{NC}  "
+                f"{DIM}{total_test_cases} total{NC}"
+            )
+        else:
+            print(f"{DIM}  No test case counts available.{NC}")
     elif test_env and not args.no_tests:
-        print(f"{Y}No test results to report.{NC}")
+        print(f"{Y}  No test results.{NC}")
 
-    print("=" * 50)
+    print(_sep("═"))
+
+    install_failed_list = [r for r in install_results if r.status != STATUS_PASS]
+    build_failed_list = [r for r in build_results if r.status != STATUS_PASS]
+    test_failed_list = [r for r in test_results.values() if r.status in (STATUS_TEST_FAIL, STATUS_COMPILE_ERR, STATUS_SYSTEM_ERR)]
+
     exit_code = 0
     if clean_failed:
         exit_code = 1
-    if install_failed:
+    if install_failed_list:
         exit_code = 1
-    if build_failed:
+    if build_failed_list:
         exit_code = 1
-    if len(test_failed) + len(test_broken) + len(test_crashed) > 0:
+    if test_failed_list:
         exit_code = 1
     return exit_code
 

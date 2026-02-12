@@ -11,7 +11,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Optional
 
-CHECK_INTERVAL_SECONDS = 6 * 60 * 60
+CHECK_INTERVAL_SECONDS = 30
 STATE_PATH = Path.home() / ".astra-support" / "update-state.json"
 
 
