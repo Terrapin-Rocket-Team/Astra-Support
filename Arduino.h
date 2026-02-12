@@ -2,11 +2,11 @@
 #define ARDUINO_H
 
 #ifdef __cplusplus
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cmath>
 #include <chrono>
-#include <thread>
 #else
 #include <stdint.h>
 #include <stdio.h>
@@ -242,7 +242,7 @@ public:
             int c = read();
             if (c < 0) {
                 // No data available - yield and try again
-                std::this_thread::sleep_for(std::chrono::microseconds(100));
+                delayMicroseconds(100);
                 continue;
             }
             if (c == terminator) {

@@ -1,12 +1,13 @@
 import argparse
 import os
+import stat
 import shutil
 import subprocess
 import sys
 import threading
 import time
 from collections import deque
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -43,6 +44,39 @@ def configure_console_output() -> None:
                 reconfigure(encoding="utf-8", errors="replace")
             except Exception:
                 pass
+
+
+def _enable_windows_ansi_sequences() -> bool:
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        stdout_handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        if stdout_handle in (0, -1):
+            return False
+        mode = ctypes.c_uint()
+        if kernel32.GetConsoleMode(stdout_handle, ctypes.byref(mode)) == 0:
+            return False
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+        if mode.value & ENABLE_VIRTUAL_TERMINAL_PROCESSING:
+            return True
+        return kernel32.SetConsoleMode(
+            stdout_handle, mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        ) != 0
+    except Exception:
+        return False
+
+
+def supports_live_progress() -> bool:
+    if not sys.stdout.isatty():
+        return False
+    if os.environ.get("TERM", "").lower() == "dumb":
+        return False
+    if os.name == "nt" and not _enable_windows_ansi_sequences():
+        return False
+    return True
 
 
 @dataclass
@@ -152,8 +186,10 @@ class ProgressReporter:
         if not self._visible:
             return
         sys.stdout.write("\033[2F")
-        sys.stdout.write("\033[2K\n")
-        sys.stdout.write("\033[2K\n")
+        sys.stdout.write("\033[2K")
+        sys.stdout.write("\033[1B\r")
+        sys.stdout.write("\033[2K")
+        sys.stdout.write("\033[1B\r")
         sys.stdout.flush()
         self._visible = False
 
@@ -185,10 +221,24 @@ class ProgressReporter:
 
         if self._visible:
             sys.stdout.write("\033[2F")
-        sys.stdout.write(f"\033[2K{stage_line}\n")
-        sys.stdout.write(f"\033[2K{global_line}\n")
+        sys.stdout.write(f"\033[2K{stage_line}")
+        sys.stdout.write("\033[1B\r")
+        sys.stdout.write(f"\033[2K{global_line}")
+        sys.stdout.write("\033[1B\r")
         sys.stdout.flush()
         self._visible = True
+
+
+def _retry_delay_seconds(attempt_number: int) -> float:
+    return min(0.2 * max(1, attempt_number), 1.0)
+
+
+def _remove_readonly_and_retry(remove_func, path, _excinfo) -> None:
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except OSError:
+        pass
+    remove_func(path)
 
 
 def analyze_output(log_text: str, return_code: int) -> Tuple[str, str]:
@@ -450,7 +500,7 @@ def main(argv=None):
     PARALLEL_BUILD_BASE = os.path.join(PROJECT_ROOT, ".pio", "build_parallel")
     PIO_LIBDEPS_DIR = os.path.join(PROJECT_ROOT, ".pio", "libdeps")
 
-    progress_enabled = (not args.no_progress) and sys.stdout.isatty()
+    progress_enabled = (not args.no_progress) and supports_live_progress()
     run_start_time = time.time()
 
     config_path = os.path.join(PROJECT_ROOT, "platformio.ini")
@@ -511,12 +561,24 @@ def main(argv=None):
             progress.set_stage("clean", 1)
             progress.write(f"{BS}🧹 --clean enabled: removing .pio/libdeps before running stages.{NC}")
             if os.path.isdir(PIO_LIBDEPS_DIR):
-                try:
-                    shutil.rmtree(PIO_LIBDEPS_DIR)
-                    clean_note = f"{G}✅ CLEAN OK: Removed {PIO_LIBDEPS_DIR}{NC}"
-                except Exception as exc:
+                last_exc: Optional[Exception] = None
+                for attempt in range(MAX_RETRIES + 1):
+                    try:
+                        shutil.rmtree(PIO_LIBDEPS_DIR, onerror=_remove_readonly_and_retry)
+                        clean_note = f"{G}✅ CLEAN OK: Removed {PIO_LIBDEPS_DIR}{NC}"
+                        last_exc = None
+                        break
+                    except Exception as exc:
+                        last_exc = exc
+                        if attempt < MAX_RETRIES:
+                            retry_count = attempt + 1
+                            progress.write(
+                                f"{M}⚠️  Retry {retry_count}/{MAX_RETRIES} (System Flake): clean{NC}"
+                            )
+                            time.sleep(_retry_delay_seconds(retry_count))
+                if last_exc is not None:
                     clean_failed = True
-                    clean_note = f"{M}☠️  CLEAN FAIL: {PIO_LIBDEPS_DIR} ({exc}){NC}"
+                    clean_note = f"{M}☠️  CLEAN FAIL: {PIO_LIBDEPS_DIR} ({last_exc}){NC}"
             else:
                 clean_note = f"{Y}⚠️  CLEAN SKIP: {PIO_LIBDEPS_DIR} not found.{NC}"
             progress.advance_stage()
@@ -533,24 +595,43 @@ def main(argv=None):
                 progress.write(f"{C}Using {worker_count} workers for platform installs.{NC}")
                 install_start_time = time.time()
                 with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                    future_to_platform = {
-                        executor.submit(run_platform_install, platform): platform
-                        for platform in platforms_to_install
-                    }
-                    for future in as_completed(future_to_platform):
-                        platform = future_to_platform[future]
-                        try:
-                            res = future.result()
-                        except Exception as exc:
-                            res = PlatformInstallResult(platform, STATUS_SYSTEM_ERR, -1, str(exc), 0)
-                        install_results.append(res)
-                        progress.advance_stage()
-                        if res.status == STATUS_PASS:
-                            progress.write(f"{G}✅ PLATFORM OK: {res.name} ({res.duration:.1f}s){NC}")
-                        else:
-                            progress.write(f"{M}☠️  PLATFORM FAIL: {res.name} ({res.duration:.1f}s){NC}")
-                            if res.log:
-                                progress.write(res.log)
+                    retries: Dict[str, int] = {name: 0 for name in platforms_to_install}
+                    pending = deque(platforms_to_install)
+                    in_flight = {}
+
+                    while pending or in_flight:
+                        while pending and len(in_flight) < worker_count:
+                            platform = pending.popleft()
+                            in_flight[executor.submit(run_platform_install, platform)] = platform
+
+                        done_futures, _ = wait(
+                            in_flight.keys(),
+                            return_when=FIRST_COMPLETED,
+                        )
+                        for future in done_futures:
+                            platform = in_flight.pop(future)
+                            try:
+                                res = future.result()
+                            except Exception as exc:
+                                res = PlatformInstallResult(platform, STATUS_SYSTEM_ERR, -1, str(exc), 0)
+
+                            if res.status == STATUS_SYSTEM_ERR and retries[platform] < MAX_RETRIES:
+                                retries[platform] += 1
+                                progress.write(
+                                    f"{M}⚠️  Retry {retries[platform]}/{MAX_RETRIES} (System Flake): platform {platform}{NC}"
+                                )
+                                time.sleep(_retry_delay_seconds(retries[platform]))
+                                pending.append(platform)
+                                continue
+
+                            install_results.append(res)
+                            progress.advance_stage()
+                            if res.status == STATUS_PASS:
+                                progress.write(f"{G}✅ PLATFORM OK: {res.name} ({res.duration:.1f}s){NC}")
+                            else:
+                                progress.write(f"{M}☠️  PLATFORM FAIL: {res.name} ({res.duration:.1f}s){NC}")
+                                if res.log:
+                                    progress.write(res.log)
                 install_duration = time.time() - install_start_time
                 progress.write(f"{BS}Platform installs complete in {install_duration:.2f}s{NC}")
 
@@ -581,27 +662,47 @@ def main(argv=None):
                 progress.write(f"{C}Using {worker_count} workers for environment builds.{NC}")
                 build_start_time = time.time()
                 with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                    future_to_env = {
-                        executor.submit(run_build_env, env_name): env_name for env_name in build_envs
-                    }
-                    for future in as_completed(future_to_env):
-                        env_name = future_to_env[future]
-                        try:
-                            res = future.result()
-                        except Exception as exc:
-                            res = BuildResult(env_name, STATUS_SYSTEM_ERR, -1, str(exc), 0)
-                        build_results.append(res)
-                        progress.advance_stage()
-                        if res.status == STATUS_PASS:
-                            progress.write(f"{G}✅ BUILD OK: {res.name} ({res.duration:.1f}s){NC}")
-                        elif res.status == STATUS_COMPILE_ERR:
-                            progress.write(f"{Y}💥 BUILD FAIL: {res.name} ({res.duration:.1f}s){NC}")
-                            if res.log:
-                                progress.write(res.log)
-                        else:
-                            progress.write(f"{M}☠️  BUILD CRASH: {res.name} ({res.duration:.1f}s){NC}")
-                            if res.log:
-                                progress.write(res.log)
+                    retries: Dict[str, int] = {name: 0 for name in build_envs}
+                    pending = deque(build_envs)
+                    in_flight = {}
+
+                    while pending or in_flight:
+                        while pending and len(in_flight) < worker_count:
+                            env_name = pending.popleft()
+                            in_flight[executor.submit(run_build_env, env_name)] = env_name
+
+                        done_futures, _ = wait(
+                            in_flight.keys(),
+                            return_when=FIRST_COMPLETED,
+                        )
+                        for future in done_futures:
+                            env_name = in_flight.pop(future)
+                            try:
+                                res = future.result()
+                            except Exception as exc:
+                                res = BuildResult(env_name, STATUS_SYSTEM_ERR, -1, str(exc), 0)
+
+                            if res.status == STATUS_SYSTEM_ERR and retries[env_name] < MAX_RETRIES:
+                                retries[env_name] += 1
+                                progress.write(
+                                    f"{M}⚠️  Retry {retries[env_name]}/{MAX_RETRIES} (System Flake): build {env_name}{NC}"
+                                )
+                                time.sleep(_retry_delay_seconds(retries[env_name]))
+                                pending.append(env_name)
+                                continue
+
+                            build_results.append(res)
+                            progress.advance_stage()
+                            if res.status == STATUS_PASS:
+                                progress.write(f"{G}✅ BUILD OK: {res.name} ({res.duration:.1f}s){NC}")
+                            elif res.status == STATUS_COMPILE_ERR:
+                                progress.write(f"{Y}💥 BUILD FAIL: {res.name} ({res.duration:.1f}s){NC}")
+                                if res.log:
+                                    progress.write(res.log)
+                            else:
+                                progress.write(f"{M}☠️  BUILD CRASH: {res.name} ({res.duration:.1f}s){NC}")
+                                if res.log:
+                                    progress.write(res.log)
                 build_duration = time.time() - build_start_time
                 progress.write(f"{BS}Builds complete in {build_duration:.2f}s{NC}")
             else:
@@ -656,6 +757,7 @@ def main(argv=None):
                                     progress.write(
                                         f"{M}⚠️  Retry {retries[folder]}/{MAX_RETRIES} (System Flake): {folder}{NC}"
                                     )
+                                    time.sleep(_retry_delay_seconds(retries[folder]))
                                     pending.append(folder)
                                     continue
 

@@ -2,12 +2,12 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
-#include <thread>
 
 // Platform-specific includes
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>
+    #include <windows.h>
     #pragma comment(lib, "ws2_32.lib")
     #define SOCKET_ERROR_CODE WSAGetLastError()
     #define CLOSE_SOCKET closesocket
@@ -27,6 +27,15 @@
 #endif
 
 bool SITLSocket::socketsInitialized = false;
+
+static void sleep_ms(unsigned int ms)
+{
+#ifdef _WIN32
+    ::Sleep(ms);
+#else
+    usleep(ms * 1000);
+#endif
+}
 
 bool SITLSocket::initializeSockets()
 {
@@ -135,7 +144,7 @@ bool SITLSocket::connect(const char *host, int port)
         }
 
         // Wait 500ms before trying again to avoid pegging the CPU
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        sleep_ms(500);
     }
     // --- END RETRY LOGIC ---
 

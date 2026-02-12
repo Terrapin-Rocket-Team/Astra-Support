@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>
+#include <climits>
 #include <new>
 
 using uint8_t = std::uint8_t;
@@ -110,9 +111,8 @@ public:
         return println(buf);
     }
 
-    // Only define size_t overload if it's different from unsigned long
-    // On 64-bit Linux, size_t == unsigned long, causing duplicate overload
-#if !((defined(__linux__) || defined(__APPLE__)) && defined(__LP64__))
+    // Define size_t overload only when it won't collide with other integer overloads.
+#if (SIZE_MAX != UINT_MAX) && (SIZE_MAX != ULONG_MAX)
     size_t println(size_t i)
     {
         char buf[32];
