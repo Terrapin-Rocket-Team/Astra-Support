@@ -177,39 +177,6 @@ def _get_update_info() -> Optional[UpdateInfo]:
     return UpdateInfo(available=False, current=current)
 
 
-def _run_update(install_spec: Optional[str]) -> tuple[bool, str]:
-    pipx_path = shutil.which("pipx")
-    if pipx_path:
-        try:
-            res = subprocess.run(
-                [pipx_path, "upgrade", "astra-support"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                timeout=120,
-                check=False,
-            )
-            if res.returncode == 0:
-                return True, "Updated via pipx."
-        except Exception:
-            pass
-
-    upgrade_target = install_spec or "astra-support"
-    try:
-        res = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--upgrade", upgrade_target],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-        if res.returncode == 0:
-            return True, "Updated via pip."
-        return False, res.stdout.strip()[-400:]
-    except Exception as exc:
-        return False, str(exc)
-
 
 def maybe_prompt_for_update(*, no_update_check: bool = False, force: bool = False) -> bool:
     if no_update_check:
@@ -226,17 +193,21 @@ def maybe_prompt_for_update(*, no_update_check: bool = False, force: bool = Fals
     if not update or not update.available:
         return False
 
+    # Determine the suggested upgrade command.
+    if shutil.which("pipx"):
+        upgrade_cmd = "pipx upgrade astra-support"
+    else:
+        upgrade_cmd = "pip install --upgrade astra-support"
+
     latest_label = update.latest or "newer"
-    print(f"Update available for astra-support ({update.current} -> {latest_label}).")
-    answer = input("Install update now? [y/N]: ").strip().lower()
-    if answer not in {"y", "yes"}:
-        return False
 
-    ok, message = _run_update(update.install_spec)
-    if ok:
-        print(message)
-        print("Rerun your command to use the updated version.")
-        return True
+    BS = "\033[1m"
+    Y = "\033[93m"
+    DIM = "\033[2m"
+    NC = "\033[0m"
 
-    print(f"Update failed: {message}")
+    print(
+        f"{Y}  ↑  Update available:{NC} {update.current} → {BS}{latest_label}{NC}"
+        f"   {DIM}run: {upgrade_cmd}{NC}"
+    )
     return False

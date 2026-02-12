@@ -227,17 +227,21 @@ def analyze_output(log_text: str, return_code: int) -> Tuple[str, str]:
 
     for line in lines:
         line_strip = line.strip()
-        if ":FAIL:" in line or "[FAILED]" in line:
-            cleaned_lines.append(f"{R}  [ASSERT] {NC}{line_strip}")
+        # Unity assert: ":FAIL:" format, or "[FAILED]" only on lines with a source path (cpp:N:)
+        is_unity_fail = ":FAIL:" in line or (
+            "[FAILED]" in line and (".cpp:" in line or ".c:" in line)
+        )
+        if is_unity_fail:
+            cleaned_lines.append(f"{R}    {NC}{line_strip}")
             found_assert_fail = True
         elif ": error:" in line or "undefined reference" in line or "fatal error:" in line:
-            cleaned_lines.append(f"{Y}  [COMPILER] {NC}{line_strip}")
+            cleaned_lines.append(f"{Y}    {NC}{line_strip}")
             found_syntax_error = True
         elif "Error:" in line or "ERROR:" in line:
-            cleaned_lines.append(f"{M}  [PIO] {NC}{line_strip}")
+            cleaned_lines.append(f"{M}    {NC}{line_strip}")
             found_pio_error = True
         elif "Permission denied" in line or "cannot open output file" in line or "Device or resource busy" in line:
-            cleaned_lines.append(f"{M}  [OS LOCK] {NC}{line_strip}")
+            cleaned_lines.append(f"{M}    {NC}{line_strip}")
             found_system_lock = True
 
     if return_code == 0:
@@ -254,7 +258,7 @@ def analyze_output(log_text: str, return_code: int) -> Tuple[str, str]:
         return STATUS_COMPILE_ERR, "\n".join(cleaned_lines)
 
     if not cleaned_lines:
-        cleaned_lines = [f"{M}  [SYSTEM CRASH] {NC}No error output captured."]
+        cleaned_lines = [f"{M}    No error output captured.{NC}"]
     return STATUS_SYSTEM_ERR, "\n".join(cleaned_lines)
 
 
@@ -860,6 +864,26 @@ def main(argv=None):
     elapsed_str = f"{elapsed_m}m {elapsed_s}s" if elapsed_m else f"{elapsed_s}s"
 
     # ── SUMMARY ────────────────────────────────────────────────────────────────
+    def _status_color(status: str) -> str:
+        return {STATUS_PASS: G, STATUS_TEST_FAIL: R, STATUS_COMPILE_ERR: Y}.get(status, M)
+
+    def _status_label(status: str) -> str:
+        return {
+            STATUS_PASS: "pass",
+            STATUS_TEST_FAIL: "fail",
+            STATUS_COMPILE_ERR: "error",
+            STATUS_SYSTEM_ERR: "crash",
+        }.get(status, status)
+
+    def _print_rows(rows: list) -> None:
+        # rows: list of (icon, name, status_str, status_color, extra)
+        # Pad name column to align status and extra columns.
+        name_w = max((len(r[1]) for r in rows), default=0)
+        for icon, name, status_str, color, extra in rows:
+            name_pad = name.ljust(name_w)
+            extra_str = f"  {DIM}{extra}{NC}" if extra else ""
+            print(f"  {color}{icon}  {name_pad}  {status_str}{NC}{extra_str}")
+
     print(f"\n{_sep('═')}")
     print(f"{BS}  RESULTS{NC}  {DIM}({elapsed_str}){NC}")
     print(_sep("─"))
@@ -870,43 +894,34 @@ def main(argv=None):
         print(f"  {clean_note}")
         clean_failed_results = [r for r in clean_results if r.status != STATUS_PASS]
         if clean_failed_results:
-            for r in clean_failed_results:
-                print(f"{M}    ✘  {r.name}{NC}")
+            rows = [("✘", r.name, "fail", M, "") for r in clean_failed_results]
+            _print_rows(rows)
         print(_sep("─"))
 
     # Platform installs
     if install_results:
-        install_failed = [r for r in install_results if r.status != STATUS_PASS]
         print(f"{BS}  Platforms{NC}")
+        install_failed = [r for r in install_results if r.status != STATUS_PASS]
         if not install_failed:
-            print(f"{G}  ✔  All {len(install_results)} platform(s) installed{NC}")
+            print(f"{G}  ✔  all {len(install_results)} installed{NC}")
         else:
-            print(f"{G}  Installed ({len(install_results) - len(install_failed)}):{NC}")
-            for r in [r for r in install_results if r.status == STATUS_PASS]:
-                print(f"    ✔  {r.name}")
-            print(f"{M}  Failed ({len(install_failed)}):{NC}")
-            for r in install_failed:
-                print(f"    ✘  {r.name}")
+            rows = [
+                ("✔" if r.status == STATUS_PASS else "✘", r.name,
+                 _status_label(r.status), _status_color(r.status), "")
+                for r in install_results
+            ]
+            _print_rows(rows)
         print(_sep("─"))
 
     # Builds
     if build_results:
-        build_passed = [r for r in build_results if r.status == STATUS_PASS]
-        build_broken = [r for r in build_results if r.status == STATUS_COMPILE_ERR]
-        build_crashed = [r for r in build_results if r.status == STATUS_SYSTEM_ERR]
         print(f"{BS}  Builds{NC}")
-        if build_passed:
-            print(f"{G}  Passing ({len(build_passed)}):{NC}")
-            for r in build_passed:
-                print(f"    ✔  {r.name}")
-        if build_broken:
-            print(f"{Y}  Build errors ({len(build_broken)}):{NC}")
-            for r in build_broken:
-                print(f"    ✘  {r.name}")
-        if build_crashed:
-            print(f"{M}  System crashes ({len(build_crashed)}):{NC}")
-            for r in build_crashed:
-                print(f"    ✘  {r.name}")
+        rows = [
+            ("✔" if r.status == STATUS_PASS else "✘", r.name,
+             _status_label(r.status), _status_color(r.status), f"{r.duration:.1f}s")
+            for r in build_results
+        ]
+        _print_rows(rows)
         print(_sep("─"))
     elif not args.no_builds:
         print(f"{Y}  No build results.{NC}")
@@ -916,33 +931,24 @@ def main(argv=None):
     if tests_skipped_reason:
         print(f"{Y}  Tests skipped: {tests_skipped_reason}{NC}")
     elif test_results:
-        test_passed = [r for r in test_results.values() if r.status == STATUS_PASS]
-        test_failed = [r for r in test_results.values() if r.status == STATUS_TEST_FAIL]
-        test_broken = [r for r in test_results.values() if r.status == STATUS_COMPILE_ERR]
-        test_crashed = [r for r in test_results.values() if r.status == STATUS_SYSTEM_ERR]
-
         total_test_cases = sum(r.test_count or 0 for r in test_results.values())
         total_passed_cases = sum(r.passed_count or 0 for r in test_results.values())
         total_failed_cases = sum(r.failed_count or 0 for r in test_results.values())
 
-        print(f"{BS}  Tests{NC}  {DIM}(env: {test_env}, {total_tests} suites, {test_duration:.2f}s){NC}")
-        if test_passed:
-            print(f"{G}  Passing ({len(test_passed)}):{NC}")
-            for r in test_passed:
-                cases = f"  {DIM}[{r.test_count}]{NC}" if r.test_count is not None else ""
-                print(f"    ✔  {r.name}{cases}")
-        if test_failed:
-            print(f"{R}  Test failures ({len(test_failed)}):{NC}")
-            for r in test_failed:
-                print(f"    ✘  {r.name}")
-        if test_broken:
-            print(f"{Y}  Build errors ({len(test_broken)}):{NC}")
-            for r in test_broken:
-                print(f"    ✘  {r.name}")
-        if test_crashed:
-            print(f"{M}  System crashes ({len(test_crashed)}):{NC}")
-            for r in test_crashed:
-                print(f"    ✘  {r.name}")
+        print(f"{BS}  Tests{NC}  {DIM}env: {test_env}  {test_duration:.1f}s{NC}")
+        rows = [
+            (
+                "✔" if r.status == STATUS_PASS else "✘",
+                r.name,
+                _status_label(r.status),
+                _status_color(r.status),
+                f"{r.test_count} cases" if r.test_count is not None else "",
+            )
+            for r in test_results.values()
+        ]
+        # Sort: passes first, then by name within each group
+        rows.sort(key=lambda x: (0 if x[2] == "pass" else 1, x[1]))
+        _print_rows(rows)
 
         print(_sep("─"))
         if total_test_cases > 0:
