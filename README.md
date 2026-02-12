@@ -23,6 +23,18 @@ astra-support init --project . --write-workflow
 This writes:
 - `.astra-support.yml`
 - `.github/workflows/run_unit_tests.yml`
+- appends managed env blocks to `platformio.ini` for:
+  - `native`
+  - `teensy41`
+  - `esp32s3`
+  - `stm32h723vehx`
+- copies required STM32H723 assets (`custom_variants/`, `ldscripts/`) when the STM32 env is included
+
+Choose envs explicitly (repeatable):
+
+```bash
+astra-support init --project . --env esp32s3 --env stm32h723vehx --env teensy41
+```
 
 ## Run Tests (consumer repo)
 
@@ -34,6 +46,7 @@ astra-support test --project .
 
 ```bash
 astra-support hitl --project . -- --mode sitl --source physics
+```
 
 ## CLI Self-Update Prompt
 
@@ -43,7 +56,6 @@ prompt to install them before continuing.
 - Skip once: `astra-support --no-update-check ...`
 - Disable globally: set `ASTRA_SUPPORT_DISABLE_UPDATE_CHECK=1`
 - Change check interval (seconds): `ASTRA_SUPPORT_UPDATE_CHECK_INTERVAL_SECONDS`
-```
 
 ## Use Native Mocks as PlatformIO dependency
 
