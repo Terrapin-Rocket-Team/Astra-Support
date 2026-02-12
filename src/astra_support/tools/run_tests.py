@@ -407,7 +407,8 @@ def run_platform_install(platform: str) -> PlatformInstallResult:
 
 def run_clean_env(env_name: str) -> CleanResult:
     commands = [
-        ["pio", "pkg", "uninstall", "-e", env_name],
+        ["pio", "run", "-e", env_name, "-t", "clean"],
+        ["pio", "pkg", "update", "-e", env_name],
         ["pio", "pkg", "install", "-e", env_name],
     ]
     start_time = time.time()
@@ -502,7 +503,7 @@ def main(argv=None):
     parser.add_argument(
         "--clean",
         action="store_true",
-        help="Refresh per-env dependencies by running 'pio pkg uninstall -e <env>' then 'pio pkg install -e <env>'.",
+        help="Refresh per-env dependencies by running clean, 'pio pkg update -e <env>', then install.",
     )
     args = parser.parse_args(argv)
 
@@ -584,7 +585,10 @@ def main(argv=None):
         if args.clean:
             progress.set_stage("clean", max(1, len(clean_envs)))
             if clean_envs:
-                worker_count = min(MAX_WORKERS, len(clean_envs))
+                # Package install/resolve is not concurrency-safe across multiple
+                # environments in practice (lock contention and partial states).
+                # Run clean/install sequentially for deterministic results.
+                worker_count = 1
                 progress.write(
                     f"{BS}🧹 Refreshing dependencies for {len(clean_envs)} environment(s){NC}"
                 )
