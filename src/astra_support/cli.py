@@ -284,7 +284,7 @@ def _cmd_hitl(args: argparse.Namespace) -> int:
     from .tools import run_sim
 
     forward = ["--project", args.project]
-    passthrough = list(args.args)
+    passthrough = list(getattr(args, "extras", []))
     if passthrough and passthrough[0] == "--":
         passthrough = passthrough[1:]
     forward.extend(passthrough)
@@ -342,7 +342,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_hitl = sub.add_parser("hitl", help="Run shared HITL/SITL simulation harness")
     p_hitl.add_argument("--project", default=".", help="Target repo path (default: .)")
-    p_hitl.add_argument("args", nargs=argparse.REMAINDER, help="Arguments forwarded to run_sim")
     p_hitl.set_defaults(func=_cmd_hitl)
 
     return parser
@@ -350,7 +349,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args, extras = parser.parse_known_args(argv)
     if maybe_prompt_for_update(no_update_check=args.no_update_check):
         return 0
+    if getattr(args, "func", None) is _cmd_hitl:
+        args.extras = extras
+    elif extras:
+        parser.error(f"unrecognized arguments: {' '.join(extras)}")
     return int(args.func(args))
