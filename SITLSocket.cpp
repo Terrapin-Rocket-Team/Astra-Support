@@ -2,12 +2,12 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <chrono>
 
 // Platform-specific includes
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>
-    #include <windows.h>
     #pragma comment(lib, "ws2_32.lib")
     #define SOCKET_ERROR_CODE WSAGetLastError()
     #define CLOSE_SOCKET closesocket
@@ -30,11 +30,11 @@ bool SITLSocket::socketsInitialized = false;
 
 static void sleep_ms(unsigned int ms)
 {
-#ifdef _WIN32
-    ::Sleep(ms);
-#else
-    usleep(ms * 1000);
-#endif
+    const auto start_point = std::chrono::steady_clock::now();
+    while (std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now() - start_point)
+               .count() < static_cast<long long>(ms)) {
+    }
 }
 
 bool SITLSocket::initializeSockets()

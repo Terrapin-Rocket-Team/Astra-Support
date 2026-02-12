@@ -2,11 +2,15 @@
 #include "SITLSocket.h"
 #include <iostream>
 #include <map>
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
+
+static void spin_wait_us(uint64_t us)
+{
+    const auto start_point = std::chrono::steady_clock::now();
+    while (std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now() - start_point)
+               .count() < static_cast<long long>(us)) {
+    }
+}
 
 const uint64_t start = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 const uint64_t startMicros = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -45,11 +49,7 @@ void resetMillis()
 
 void delay(unsigned long ms)
 {
-#ifdef _WIN32
-    ::Sleep(static_cast<DWORD>(ms));
-#else
-    usleep(ms * 1000);
-#endif
+    spin_wait_us(static_cast<uint64_t>(ms) * 1000ULL);
 }
 
 void delay(int ms)
@@ -57,32 +57,17 @@ void delay(int ms)
     if (ms <= 0) {
         return;
     }
-#ifdef _WIN32
-    ::Sleep(static_cast<DWORD>(ms));
-#else
-    usleep(static_cast<unsigned int>(ms) * 1000);
-#endif
+    spin_wait_us(static_cast<uint64_t>(ms) * 1000ULL);
 }
 
 void delayMicroseconds(unsigned int us)
 {
-#ifdef _WIN32
-    if (us == 0) {
-        return;
-    }
-    ::Sleep((us + 999) / 1000);
-#else
-    usleep(us);
-#endif
+    spin_wait_us(us);
 }
 
 void yield()
 {
-#ifdef _WIN32
-    ::Sleep(0);
-#else
-    usleep(0);
-#endif
+    // Cooperative no-op for native mocks.
 }
 
 void pinMode(int pin, int mode)
