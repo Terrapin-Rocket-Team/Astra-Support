@@ -1,4 +1,10 @@
 """Astra Support CLI package."""
 
+from importlib.metadata import PackageNotFoundError, version
+
 __all__ = ["__version__"]
-__version__ = "0.1.3"
+
+try:
+    __version__ = version("astra-support")
+except PackageNotFoundError:
+    __version__ = "0.0.0+local"
