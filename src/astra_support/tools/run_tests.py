@@ -227,7 +227,7 @@ def analyze_output(log_text: str, return_code: int) -> Tuple[str, str]:
 
     for line in lines:
         line_strip = line.strip()
-        if ":FAIL:" in line:
+        if ":FAIL:" in line or "[FAILED]" in line:
             cleaned_lines.append(f"{R}  [ASSERT] {NC}{line_strip}")
             found_assert_fail = True
         elif ": error:" in line or "undefined reference" in line or "fatal error:" in line:
@@ -245,12 +245,13 @@ def analyze_output(log_text: str, return_code: int) -> Tuple[str, str]:
             return STATUS_TEST_FAIL, "\n".join(cleaned_lines)
         return STATUS_PASS, ""
 
+    # Assert failures take priority: a crash after :FAIL: is still a test failure.
+    if found_assert_fail:
+        return STATUS_TEST_FAIL, "\n".join(cleaned_lines)
     if found_system_lock or found_pio_error:
         return STATUS_SYSTEM_ERR, "\n".join(cleaned_lines)
     if found_syntax_error:
         return STATUS_COMPILE_ERR, "\n".join(cleaned_lines)
-    if found_assert_fail:
-        return STATUS_TEST_FAIL, "\n".join(cleaned_lines)
 
     if not cleaned_lines:
         cleaned_lines = [f"{M}  [SYSTEM CRASH] {NC}No error output captured."]
