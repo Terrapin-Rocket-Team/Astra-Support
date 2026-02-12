@@ -1,7 +1,5 @@
 import argparse
 import os
-import stat
-import shutil
 import subprocess
 import sys
 import threading
@@ -17,7 +15,6 @@ MAX_RETRIES = 3
 PROJECT_ROOT = os.getcwd()
 TEST_DIR = os.path.join(PROJECT_ROOT, "test")
 PARALLEL_BUILD_BASE = os.path.join(PROJECT_ROOT, ".pio", "build_parallel")
-PIO_LIBDEPS_DIR = os.path.join(PROJECT_ROOT, ".pio", "libdeps")
 
 # ANSI Colors
 BS = "\033[1m"
@@ -46,35 +43,10 @@ def configure_console_output() -> None:
                 pass
 
 
-def _enable_windows_ansi_sequences() -> bool:
-    if os.name != "nt":
-        return True
-    try:
-        import ctypes
-
-        kernel32 = ctypes.windll.kernel32
-        stdout_handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
-        if stdout_handle in (0, -1):
-            return False
-        mode = ctypes.c_uint()
-        if kernel32.GetConsoleMode(stdout_handle, ctypes.byref(mode)) == 0:
-            return False
-        ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
-        if mode.value & ENABLE_VIRTUAL_TERMINAL_PROCESSING:
-            return True
-        return kernel32.SetConsoleMode(
-            stdout_handle, mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING
-        ) != 0
-    except Exception:
-        return False
-
-
 def supports_live_progress() -> bool:
     if not sys.stdout.isatty():
         return False
     if os.environ.get("TERM", "").lower() == "dumb":
-        return False
-    if os.name == "nt" and not _enable_windows_ansi_sequences():
         return False
     return True
 
@@ -109,6 +81,15 @@ class PlatformInstallResult:
     duration: float
 
 
+@dataclass
+class CleanResult:
+    name: str
+    status: str
+    code: int
+    log: str
+    duration: float
+
+
 class ProgressReporter:
     def __init__(self, enabled: bool, total_phases: int, global_start_time: float):
         self.enabled = enabled
@@ -123,6 +104,7 @@ class ProgressReporter:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._visible = False
+        self._last_line_len = 0
 
     def start(self) -> None:
         if not self.enabled:
@@ -185,13 +167,12 @@ class ProgressReporter:
     def _clear_unlocked(self) -> None:
         if not self._visible:
             return
-        sys.stdout.write("\033[2F")
-        sys.stdout.write("\033[2K")
-        sys.stdout.write("\033[1B\r")
-        sys.stdout.write("\033[2K")
-        sys.stdout.write("\033[1B\r")
+        sys.stdout.write("\r")
+        sys.stdout.write(" " * self._last_line_len)
+        sys.stdout.write("\r")
         sys.stdout.flush()
         self._visible = False
+        self._last_line_len = 0
 
     def _elapsed_str(self) -> str:
         elapsed = max(0, int(time.time() - self.global_start_time))
@@ -207,38 +188,26 @@ class ProgressReporter:
         return f"[{'=' * filled}{'-' * (width - filled)}] {int(ratio * 100):3d}% ({int(done)}/{int(total)})"
 
     def _render_unlocked(self) -> None:
-        stage_line = (
-            f"{C}Stage{NC}  {self.stage_name:<10} "
-            f"{self._bar(self.stage_done, self.stage_total)} | Elapsed {self._elapsed_str()}"
+        active_task = self.completed_phases + (1 if self.phase_active else 0)
+        active_task = min(self.total_phases, active_task)
+        line = (
+            f"Stage {self.stage_name:<10} "
+            f"{self._bar(self.stage_done, self.stage_total)} | "
+            f"Tasks {active_task}/{self.total_phases} | "
+            f"Elapsed {self._elapsed_str()}"
         )
-        global_units = float(self.completed_phases)
-        if self.phase_active:
-            global_units += self.stage_done / max(1, self.stage_total)
-        global_line = (
-            f"{M}Global{NC} tasks      "
-            f"{self._bar(global_units, self.total_phases)} | Elapsed {self._elapsed_str()}"
-        )
-
-        if self._visible:
-            sys.stdout.write("\033[2F")
-        sys.stdout.write(f"\033[2K{stage_line}")
-        sys.stdout.write("\033[1B\r")
-        sys.stdout.write(f"\033[2K{global_line}")
-        sys.stdout.write("\033[1B\r")
+        padding = " " * max(0, self._last_line_len - len(line))
+        sys.stdout.write("\r")
+        sys.stdout.write(line)
+        if padding:
+            sys.stdout.write(padding)
         sys.stdout.flush()
         self._visible = True
+        self._last_line_len = len(line)
 
 
 def _retry_delay_seconds(attempt_number: int) -> float:
     return min(0.2 * max(1, attempt_number), 1.0)
-
-
-def _remove_readonly_and_retry(remove_func, path, _excinfo) -> None:
-    try:
-        os.chmod(path, stat.S_IWRITE)
-    except OSError:
-        pass
-    remove_func(path)
 
 
 def analyze_output(log_text: str, return_code: int) -> Tuple[str, str]:
@@ -426,6 +395,35 @@ def run_platform_install(platform: str) -> PlatformInstallResult:
         return PlatformInstallResult(platform, STATUS_SYSTEM_ERR, -1, str(e), 0)
 
 
+def run_clean_env(env_name: str) -> CleanResult:
+    commands = [
+        ["pio", "pkg", "uninstall", "-e", env_name],
+        ["pio", "pkg", "install", "-e", env_name],
+    ]
+    start_time = time.time()
+    output_chunks: List[str] = []
+    return_code = 0
+    try:
+        for cmd in commands:
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=PROJECT_ROOT,
+            )
+            output_chunks.append(result.stdout or "")
+            if result.returncode != 0:
+                return_code = result.returncode
+                break
+        duration = time.time() - start_time
+        joined_output = "\n".join(chunk for chunk in output_chunks if chunk)
+        status, clean_log = analyze_output(joined_output, return_code)
+        return CleanResult(env_name, status, return_code, clean_log, duration)
+    except Exception as e:
+        return CleanResult(env_name, STATUS_SYSTEM_ERR, -1, str(e), 0)
+
+
 def run_build_env(env_name: str) -> BuildResult:
     cmd = ["pio", "run", "-e", env_name]
     start_time = time.time()
@@ -474,7 +472,6 @@ def main(argv=None):
     global PROJECT_ROOT
     global TEST_DIR
     global PARALLEL_BUILD_BASE
-    global PIO_LIBDEPS_DIR
 
     configure_console_output()
 
@@ -491,14 +488,13 @@ def main(argv=None):
     parser.add_argument(
         "--clean",
         action="store_true",
-        help="Delete .pio/libdeps before running to force dependency refresh.",
+        help="Refresh per-env dependencies by running 'pio pkg uninstall -e <env>' then 'pio pkg install -e <env>'.",
     )
     args = parser.parse_args(argv)
 
     PROJECT_ROOT = os.path.abspath(args.project)
     TEST_DIR = os.path.join(PROJECT_ROOT, "test")
     PARALLEL_BUILD_BASE = os.path.join(PROJECT_ROOT, ".pio", "build_parallel")
-    PIO_LIBDEPS_DIR = os.path.join(PROJECT_ROOT, ".pio", "libdeps")
 
     progress_enabled = (not args.no_progress) and supports_live_progress()
     run_start_time = time.time()
@@ -513,6 +509,7 @@ def main(argv=None):
     env_platforms = parse_env_platforms(config_path)
     platforms_to_install = select_platforms_for_envs(build_envs, env_platforms)
     test_env = select_test_env(envs)
+    clean_envs = build_envs if build_envs else envs
 
     test_folders: List[str] = []
     tests_skipped_reason: Optional[str] = None
@@ -550,6 +547,7 @@ def main(argv=None):
 
     clean_failed = False
     clean_note = ""
+    clean_results: List[CleanResult] = []
     install_results: List[PlatformInstallResult] = []
     build_results: List[BuildResult] = []
     test_results: Dict[str, TestResult] = {}
@@ -558,30 +556,68 @@ def main(argv=None):
 
     try:
         if args.clean:
-            progress.set_stage("clean", 1)
-            progress.write(f"{BS}🧹 --clean enabled: removing .pio/libdeps before running stages.{NC}")
-            if os.path.isdir(PIO_LIBDEPS_DIR):
-                last_exc: Optional[Exception] = None
-                for attempt in range(MAX_RETRIES + 1):
-                    try:
-                        shutil.rmtree(PIO_LIBDEPS_DIR, onerror=_remove_readonly_and_retry)
-                        clean_note = f"{G}✅ CLEAN OK: Removed {PIO_LIBDEPS_DIR}{NC}"
-                        last_exc = None
-                        break
-                    except Exception as exc:
-                        last_exc = exc
-                        if attempt < MAX_RETRIES:
-                            retry_count = attempt + 1
-                            progress.write(
-                                f"{M}⚠️  Retry {retry_count}/{MAX_RETRIES} (System Flake): clean{NC}"
-                            )
-                            time.sleep(_retry_delay_seconds(retry_count))
-                if last_exc is not None:
-                    clean_failed = True
-                    clean_note = f"{M}☠️  CLEAN FAIL: {PIO_LIBDEPS_DIR} ({last_exc}){NC}"
+            progress.set_stage("clean", max(1, len(clean_envs)))
+            if clean_envs:
+                worker_count = min(MAX_WORKERS, len(clean_envs))
+                progress.write(
+                    f"{BS}🧹 --clean enabled: refreshing dependencies for {len(clean_envs)} environment(s).{NC}"
+                )
+                progress.write(f"{C}Using {worker_count} workers for dependency refresh.{NC}")
+                clean_start_time = time.time()
+                with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                    retries: Dict[str, int] = {name: 0 for name in clean_envs}
+                    pending = deque(clean_envs)
+                    in_flight = {}
+
+                    while pending or in_flight:
+                        while pending and len(in_flight) < worker_count:
+                            env_name = pending.popleft()
+                            in_flight[executor.submit(run_clean_env, env_name)] = env_name
+
+                        done_futures, _ = wait(
+                            in_flight.keys(),
+                            return_when=FIRST_COMPLETED,
+                        )
+                        for future in done_futures:
+                            env_name = in_flight.pop(future)
+                            try:
+                                res = future.result()
+                            except Exception as exc:
+                                res = CleanResult(env_name, STATUS_SYSTEM_ERR, -1, str(exc), 0)
+
+                            if res.status == STATUS_SYSTEM_ERR and retries[env_name] < MAX_RETRIES:
+                                retries[env_name] += 1
+                                progress.write(
+                                    f"{M}⚠️  Retry {retries[env_name]}/{MAX_RETRIES} (System Flake): clean {env_name}{NC}"
+                                )
+                                time.sleep(_retry_delay_seconds(retries[env_name]))
+                                pending.append(env_name)
+                                continue
+
+                            clean_results.append(res)
+                            progress.advance_stage()
+                            if res.status == STATUS_PASS:
+                                progress.write(f"{G}✅ CLEAN OK: {res.name} ({res.duration:.1f}s){NC}")
+                            else:
+                                progress.write(f"{M}☠️  CLEAN FAIL: {res.name} ({res.duration:.1f}s){NC}")
+                                if res.log:
+                                    progress.write(res.log)
+                clean_duration = time.time() - clean_start_time
+                clean_failed_count = sum(1 for r in clean_results if r.status != STATUS_PASS)
+                clean_failed = clean_failed_count > 0
+                if clean_failed:
+                    clean_note = (
+                        f"{M}☠️  CLEAN FAIL: {clean_failed_count}/{len(clean_results)} environment(s) failed "
+                        f"dependency refresh.{NC}"
+                    )
+                else:
+                    clean_note = (
+                        f"{G}✅ CLEAN OK: Refreshed dependencies for {len(clean_results)} environment(s) "
+                        f"in {clean_duration:.2f}s.{NC}"
+                    )
             else:
-                clean_note = f"{Y}⚠️  CLEAN SKIP: {PIO_LIBDEPS_DIR} not found.{NC}"
-            progress.advance_stage()
+                clean_note = f"{Y}⚠️  CLEAN SKIP: No PlatformIO environments found for dependency refresh.{NC}"
+                progress.advance_stage()
             progress.complete_stage()
             progress.write(clean_note)
 
@@ -803,6 +839,11 @@ def main(argv=None):
     if args.clean:
         print(f"{BS}Clean Step{NC}")
         print(clean_note)
+        clean_failed_results = [r for r in clean_results if r.status != STATUS_PASS]
+        if clean_failed_results:
+            print(f"{M}Failed ({len(clean_failed_results)}):{NC}")
+            for r in clean_failed_results:
+                print(f"  ☠️  {r.name}")
         print("-" * 50)
 
     install_failed = [r for r in install_results if r.status != STATUS_PASS]
