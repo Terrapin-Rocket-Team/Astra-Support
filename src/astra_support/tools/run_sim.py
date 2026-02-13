@@ -621,6 +621,9 @@ Examples:
         'fc_flap_cmd_deg': [],   # FC desired flap angle from AirbrakeController
         'fc_flap_actual_deg': [],# FC measured/actual flap angle
         'fc_est_apogee_m': [],   # FC estimated/predicted apogee
+        'fc_target_apogee_m': [],# FC desired/target apogee setpoint
+        'fc_mach': [],           # FC-estimated Mach number
+        'fc_transonic_lockout': [], # FC transonic lockout active flag (0/1)
         'fc_values': [],
         'truth_accel': [],       # Ground truth acceleration (from sim)
         'sensor_accel': [],      # Measured acceleration (from accel sensor)
@@ -735,6 +738,9 @@ Examples:
             fc_flap_cmd_deg = float("nan")
             fc_flap_actual_deg = float("nan")
             fc_est_apogee_m = float("nan")
+            fc_target_apogee_m = float("nan")
+            fc_mach = float("nan")
+            fc_transonic_lockout = float("nan")
             current_values = []
             fc_accel_x, fc_accel_y, fc_accel_z = 0.0, 0.0, 0.0
             fc_vel_x, fc_vel_y, fc_vel_z = 0.0, 0.0, 0.0
@@ -805,6 +811,30 @@ Examples:
                         ],
                         "",
                     )
+                    fc_target_apogee_str = get_fc(
+                        [
+                            "AirbrakeCtrl - Target Apogee (m)",
+                            "State - Target Apogee (m)",
+                            "Target Apogee (m)",
+                        ],
+                        "",
+                    )
+                    fc_mach_str = get_fc(
+                        [
+                            "AirbrakeCtrl - Mach",
+                            "State - Mach",
+                            "Mach",
+                        ],
+                        "",
+                    )
+                    fc_transonic_lockout_str = get_fc(
+                        [
+                            "AirbrakeCtrl - Transonic Lockout",
+                            "State - Transonic Lockout",
+                            "Transonic Lockout",
+                        ],
+                        "",
+                    )
                     if "-" in temp_stage: temp_stage = temp_stage.split('-')[-1].strip()
                     fc_stage_val = temp_stage
                     try: fc_alt_val = float(fc_alt_str)
@@ -837,6 +867,12 @@ Examples:
                     except: pass
                     try: fc_est_apogee_m = float(fc_est_apogee_str)
                     except: pass
+                    try: fc_target_apogee_m = float(fc_target_apogee_str)
+                    except: pass
+                    try: fc_mach = float(fc_mach_str)
+                    except: pass
+                    try: fc_transonic_lockout = float(fc_transonic_lockout_str)
+                    except: pass
 
             # D. Store & Display
             history['time'].append(packet.timestamp)
@@ -847,6 +883,9 @@ Examples:
             history['fc_flap_cmd_deg'].append(fc_flap_cmd_deg)
             history['fc_flap_actual_deg'].append(fc_flap_actual_deg)
             history['fc_est_apogee_m'].append(fc_est_apogee_m)
+            history['fc_target_apogee_m'].append(fc_target_apogee_m)
+            history['fc_mach'].append(fc_mach)
+            history['fc_transonic_lockout'].append(fc_transonic_lockout)
             history['fc_values'].append(current_values)
             history['truth_accel'].append(packet.truth_accel if packet.truth_accel is not None else 0.0)  # Ground truth inertial accel
             history['sensor_accel'].append(packet.accel[2])  # Sensor measured specific force (z-axis)
@@ -932,10 +971,76 @@ Examples:
         print(f"{Colors.OKCYAN}Plotting results...{Colors.ENDC}")
         try:
             # Single airbrake graph:
-            # - left axis: desired/actual flap angle
-            # - right axis: estimated apogee (and optional FC altitude for context)
-            fig, ax_ab = plt.subplots(1, 1, figsize=(12, 8))
-            ax_apo = ax_ab.twinx()
+            # - left axis: apogee/altitude (drives y-gridlines)
+            # - right axis: desired/actual flap angle
+            fig, ax_apo = plt.subplots(1, 1, figsize=(12, 8))
+            ax_ab = ax_apo.twinx()
+
+            ax_apo.plot(
+                history['time'],
+                history['fc_est_apogee_m'],
+                label='Estimated Apogee (m)',
+                color='tab:red',
+                linewidth=1.8,
+                alpha=0.9,
+            )
+            target_apogee_values = [
+                v for v in history['fc_target_apogee_m']
+                if isinstance(v, (int, float)) and v == v
+            ]
+            clean_fc_alt = [x for x in history['fc_alt'] if isinstance(x, (int, float)) and x == x]
+            actual_apogee_m = max(clean_fc_alt) if clean_fc_alt else None
+            clean_fc_est = [x for x in history['fc_est_apogee_m'] if isinstance(x, (int, float)) and x == x]
+            predicted_apogee_m = clean_fc_est[-1] if clean_fc_est else None
+            if target_apogee_values:
+                target_apogee_m = target_apogee_values[-1]
+                ax_apo.axhline(
+                    y=target_apogee_m,
+                    label=f'Desired Apogee ({target_apogee_m:.0f} m)',
+                    color='tab:purple',
+                    linewidth=1.6,
+                    linestyle='-.',
+                    alpha=0.85,
+                )
+                if actual_apogee_m is not None:
+                    ax_apo.axhline(
+                        y=actual_apogee_m,
+                        label=f'Actual Apogee ({actual_apogee_m:.0f} m)',
+                        color='tab:gray',
+                        linewidth=1.4,
+                        linestyle='--',
+                        alpha=0.9,
+                    )
+                    apogee_error_m = target_apogee_m - actual_apogee_m
+                    # Legend-only label for quick target-vs-actual error readout.
+                    ax_apo.plot(
+                        [],
+                        [],
+                        linestyle='none',
+                        label=f'Apogee Error (Target-Actual): {apogee_error_m:+.1f} m',
+                    )
+            if predicted_apogee_m is not None and actual_apogee_m is not None:
+                pred_error_m = predicted_apogee_m - actual_apogee_m
+                ax_apo.plot(
+                    [],
+                    [],
+                    linestyle='none',
+                    label=f'Apogee Error (Pred-Actual): {pred_error_m:+.1f} m',
+                )
+
+            # Keep FC altitude for context on same right axis.
+            clean_fc_alt = [x if x != 0 else None for x in history['fc_alt']]
+            ax_apo.plot(
+                history['time'],
+                clean_fc_alt,
+                label='FC Altitude (m)',
+                color='orange',
+                linewidth=1.3,
+                linestyle=':',
+                alpha=0.55,
+            )
+            ax_apo.set_ylabel("Apogee / Altitude (m)", fontsize=10)
+            ax_apo.grid(True, which='both', linestyle='--', alpha=0.35)
 
             ax_ab.plot(
                 history['time'],
@@ -953,27 +1058,6 @@ Examples:
                 linestyle='--',
             )
             ax_ab.set_ylabel("Flap Angle (deg)", fontsize=10)
-            ax_ab.grid(True, which='both', linestyle='--', alpha=0.35)
-            ax_apo.plot(
-                history['time'],
-                history['fc_est_apogee_m'],
-                label='Estimated Apogee (m)',
-                color='tab:red',
-                linewidth=1.8,
-                alpha=0.9,
-            )
-
-            # Keep FC altitude for context on same right axis.
-            clean_fc_alt = [x if x != 0 else None for x in history['fc_alt']]
-            ax_apo.plot(
-                history['time'],
-                clean_fc_alt,
-                label='FC Altitude (m)',
-                color='orange',
-                linewidth=1.3,
-                linestyle=':',
-                alpha=0.55,
-            )
 
             # Stage transitions
             labeled_stages = set()
@@ -1000,7 +1084,7 @@ Examples:
                     else:
                         labeled_stages.add(label)
 
-                    ax_ab.axvline(
+                    ax_apo.axvline(
                         x=event_time,
                         color=stage_color,
                         linestyle='-',
@@ -1019,14 +1103,46 @@ Examples:
                         fontsize=8,
                     )
 
-            ax_ab.set_title("Airbrake Controller Telemetry", fontsize=12, fontweight='bold')
-            ax_apo.set_ylabel("Apogee / Altitude (m)", fontsize=10)
+            # Lockout release marker (first transition from active->inactive)
+            lockout_vals = history.get('fc_transonic_lockout', [])
+            lockout_release_t = None
+            for i in range(1, len(lockout_vals)):
+                prev = lockout_vals[i - 1]
+                curr = lockout_vals[i]
+                if not (isinstance(prev, (int, float)) and prev == prev):
+                    continue
+                if not (isinstance(curr, (int, float)) and curr == curr):
+                    continue
+                if prev > 0.5 and curr <= 0.5:
+                    lockout_release_t = history['time'][i]
+                    break
+            if lockout_release_t is not None:
+                ax_apo.axvline(
+                    x=lockout_release_t,
+                    color='tab:olive',
+                    linestyle='--',
+                    linewidth=1.5,
+                    alpha=0.9,
+                    label='Lockout Released',
+                )
+                ax_apo.text(
+                    lockout_release_t,
+                    y_max * 0.88 if y_max > 0 else 0.0,
+                    " Lockout Off",
+                    color='tab:olive',
+                    rotation=90,
+                    verticalalignment='top',
+                    fontweight='bold',
+                    fontsize=8,
+                )
+
+            ax_apo.set_title("Airbrake Controller Telemetry", fontsize=12, fontweight='bold')
 
             ab_handles, ab_labels = ax_ab.get_legend_handles_labels()
             apo_handles, apo_labels = ax_apo.get_legend_handles_labels()
-            ax_ab.legend(ab_handles + apo_handles, ab_labels + apo_labels, loc='best', fontsize=9, framealpha=0.9)
+            ax_apo.legend(ab_handles + apo_handles, ab_labels + apo_labels, loc='best', fontsize=9, framealpha=0.9)
 
-            ax_ab.set_xlabel("Time (s)", fontsize=10)
+            ax_apo.set_xlabel("Time (s)", fontsize=10)
 
             # Overall figure title
             fig.suptitle(f"Flight Data Analysis - Source: {sim_source_name}",
