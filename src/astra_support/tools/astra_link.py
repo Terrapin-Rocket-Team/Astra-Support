@@ -46,7 +46,12 @@ class SerialLink(FlightComputerLink):
 
 class TCPLink(FlightComputerLink):
     """SITL: Connect via TCP Socket (Server Mode)."""
-    def __init__(self, host: str = '0.0.0.0', port: int = 5555):
+    def __init__(
+        self,
+        host: str = '0.0.0.0',
+        port: int = 5555,
+        connect_timeout_s: Optional[float] = None,
+    ):
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server.bind((host, port))
@@ -56,8 +61,15 @@ class TCPLink(FlightComputerLink):
         print(f"[Link] SITL Server listening on {host}:{port}...")
         # Accept with timeout to allow Ctrl+C interruption
         self.conn = None
+        deadline = None
+        if connect_timeout_s is not None and connect_timeout_s > 0:
+            deadline = time.monotonic() + connect_timeout_s
         try:
             while self.conn is None:
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise ConnectionError(
+                        f"Timed out waiting for Flight Software connection after {connect_timeout_s:.1f}s"
+                    )
                 try:
                     self.conn, addr = self.server.accept()
                     self.conn.setblocking(False) # Non-blocking for data transfer

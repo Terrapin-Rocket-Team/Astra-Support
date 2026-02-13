@@ -107,6 +107,10 @@ Examples:
 
     args = parser.parse_args(argv)
     project_root = os.path.abspath(args.project)
+    auto_started_sitl = args.mode == 'sitl' and not args.no_auto_start
+    connect_timeout_s = 20.0 if auto_started_sitl else None
+    handshake_timeout_s = 20.0 if auto_started_sitl else None
+    max_consecutive_fc_timeouts = 20 if auto_started_sitl else None
 
     # --- 0. Build Native Environment (if requested) ---
     if args.build:
@@ -137,7 +141,7 @@ Examples:
 
     # --- 1. Start SITL Executable (if needed) ---
     sitl_process = None
-    if args.mode == 'sitl' and not args.no_auto_start:
+    if auto_started_sitl:
         # Determine SITL executable path
         if args.sitl_exe:
             sitl_exe_path = args.sitl_exe
@@ -156,9 +160,7 @@ Examples:
             try:
                 sitl_process = subprocess.Popen(
                     [sitl_exe_path],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    bufsize=0
+                    cwd=project_root
                 )
                 print(f"{Colors.OKGREEN}[SITL]{Colors.ENDC} Process started (PID: {Colors.BOLD}{sitl_process.pid}{Colors.ENDC})")
                 # Give it a moment to start up
@@ -180,7 +182,7 @@ Examples:
             print(f"{Colors.OKGREEN}[Link]{Colors.ENDC} Connected!")
         else:
             print(f"{Colors.OKCYAN}[Link]{Colors.ENDC} Connecting to SITL on {Colors.BOLD}{args.host}:{args.tcp_port}{Colors.ENDC}...")
-            link = astra_link.TCPLink(args.host, args.tcp_port)
+            link = astra_link.TCPLink(args.host, args.tcp_port, connect_timeout_s=connect_timeout_s)
             print(f"{Colors.OKGREEN}[Link]{Colors.ENDC} Connected!")
     except Exception as e:
         print(f"{Colors.FAIL}Connection Failed: {e}{Colors.ENDC}")
@@ -247,10 +249,19 @@ Examples:
 
     fc_col_map = None
     fc_header_names = []
+    handshake_deadline = None
+    if handshake_timeout_s is not None:
+        handshake_deadline = time.monotonic() + handshake_timeout_s
 
     # Wait for the header (with Ctrl+C support)
     try:
         while True:
+            if sitl_process and sitl_process.poll() is not None:
+                raise ConnectionError(f"SITL process exited during handshake (code {sitl_process.returncode})")
+            if handshake_deadline is not None and time.monotonic() >= handshake_deadline:
+                raise TimeoutError(
+                    f"Timed out waiting for TELEM header after {handshake_timeout_s:.1f}s from auto-started SITL process"
+                )
             line = link.read_line()
             if line and line.startswith("TELEM/") and ("State" in line or "Time" in line):
                 fc_col_map, fc_header_names = parse_telem_header(line)
@@ -267,6 +278,14 @@ Examples:
             sitl_process.terminate()
             sitl_process.wait()
         sys.exit(0)
+    except TimeoutError as e:
+        print(f"\n{Colors.FAIL}[Error]{Colors.ENDC} Handshake timeout: {e}")
+        link.close()
+        if sitl_process:
+            print(f"{Colors.OKCYAN}[SITL]{Colors.ENDC} Terminating SITL process...")
+            sitl_process.terminate()
+            sitl_process.wait()
+        sys.exit(1)
     except ConnectionError as e:
         print(f"\n{Colors.FAIL}[Error]{Colors.ENDC} Connection died during handshake: {e}")
         link.close()
@@ -306,12 +325,22 @@ Examples:
     pkt_count = 0
     
     connection_alive = True
+    run_failed = False
+    consecutive_fc_timeouts = 0
     sim_source_name = args.source.upper()
     if args.source == 'csv' and args.file:
         sim_source_name = f"CSV ({os.path.basename(args.file)})"
 
     try:
         while connection_alive:
+            if sitl_process and sitl_process.poll() is not None:
+                print(
+                    f"\n{Colors.FAIL}[SITL]{Colors.ENDC} Auto-started SITL process exited unexpectedly "
+                    f"(code {sitl_process.returncode})."
+                )
+                run_failed = True
+                break
+
             # A. Get Next Packet
             if sim.is_finished():
                 print(f"\n{Colors.OKGREEN}[Sim]{Colors.ENDC} CSV Finished. Exiting Loop.")
@@ -332,6 +361,7 @@ Examples:
                 except ConnectionError as e:
                     print(f"\n{Colors.FAIL}[Link] Connection Died during send: {e}{Colors.ENDC}")
                     connection_alive = False
+                    run_failed = True
                     break
 
                 # Wait for Response (1.0s timeout)
@@ -348,12 +378,14 @@ Examples:
                     except ConnectionError as e:
                         print(f"\n{Colors.FAIL}[Link] Connection Died during read: {e}{Colors.ENDC}")
                         connection_alive = False
+                        run_failed = True
                         break
 
                 if not connection_alive:
                     break
 
                 if got_response:
+                    consecutive_fc_timeouts = 0
                     break
                 else:
                     attempts += 1
@@ -362,8 +394,20 @@ Examples:
                 break
 
             if attempts >= max_retries:
+                consecutive_fc_timeouts += 1
                 if pkt_count % 50 == 0:
                      print(f"\r{Colors.WARNING}[FC] Timeout - Packet {pkt_count} skipped.{Colors.ENDC}\033[K", end='')
+                if (
+                    max_consecutive_fc_timeouts is not None
+                    and consecutive_fc_timeouts >= max_consecutive_fc_timeouts
+                ):
+                    print(
+                        f"\n{Colors.FAIL}[FC]{Colors.ENDC} No TELEM responses for "
+                        f"{consecutive_fc_timeouts} consecutive packets from auto-started SITL process."
+                    )
+                    run_failed = True
+                    connection_alive = False
+                    break
                 continue # Skip this step
 
             # C. Parse Response
@@ -587,6 +631,8 @@ Examples:
             print(f"{Colors.FAIL}Plotting error: {e}{Colors.ENDC}")
             import traceback
             traceback.print_exc()
+
+    return 1 if run_failed else 0
 
 if __name__ == "__main__":
     raise SystemExit(main())
