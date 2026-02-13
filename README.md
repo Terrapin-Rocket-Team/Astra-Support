@@ -56,6 +56,12 @@ astra-support sitl --project ../Astra --source physics
 astra-support sitl --project ../Astra --source NyxORK
 ```
 
+Set an Airbrake preflight target apogee before flight packets begin:
+
+```bash
+astra-support sitl --project ../Astra --source airbrake --target-apogee 8200
+```
+
 ```bash
 astra-support sim --project ../Astra --mode hitl --port COM3 --source physics
 ```
