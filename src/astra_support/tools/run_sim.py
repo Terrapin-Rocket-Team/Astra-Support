@@ -252,6 +252,36 @@ def _invoke_hook(func, available_kwargs: dict[str, object], positional_fallback:
     )
     return func(*positional_fallback[:positional_count])
 
+
+def _send_preflight_airbrake_target(link, target_apogee_m: float) -> None:
+    command = f"AB/TARGET_APOGEE {target_apogee_m:.2f}\n"
+    print(
+        f"{Colors.OKCYAN}[Init]{Colors.ENDC} Sending preflight airbrake target apogee: "
+        f"{Colors.BOLD}{target_apogee_m:.2f} m{Colors.ENDC}"
+    )
+    link.send(command.encode("utf-8"))
+
+    # Wait briefly for AB ACK lines without blocking startup.
+    deadline = time.monotonic() + 1.0
+    saw_ack = False
+    while time.monotonic() < deadline:
+        line = link.read_line()
+        if not line:
+            time.sleep(0.01)
+            continue
+
+        if line.startswith("AB "):
+            print(f"{Colors.GRAY}[FC]{Colors.ENDC} {line}")
+            if line.startswith("AB OK"):
+                saw_ack = True
+                break
+
+    if not saw_ack:
+        print(
+            f"{Colors.WARNING}[Init]{Colors.ENDC} No explicit AB ACK received for target apogee command. "
+            "Continuing with simulation startup."
+        )
+
 def main(argv=None):
     configure_console_output()
 
@@ -320,6 +350,12 @@ Examples:
     parser.add_argument('--gyro-noise', '-g', type=float, default=0.01, help="Gyroscope noise std dev (rad/s), default=0.01")
     parser.add_argument('--mag-noise', '-j', type=float, default=0.5, help="Magnetometer noise std dev (uT), default=0.5")
     parser.add_argument('--baro-noise', '-z', type=float, default=0.5, help="Barometer noise std dev (hPa), default=0.5")
+    parser.add_argument(
+        '--target-apogee',
+        type=float,
+        default=None,
+        help="Preflight airbrake target apogee in meters. Sends AB/TARGET_APOGEE before sim flight starts.",
+    )
 
     args = parser.parse_args(argv)
     project_root = Path(args.project).resolve()
@@ -603,6 +639,21 @@ Examples:
         sys.exit(1)
 
     print(f"{Colors.OKGREEN}[Init]{Colors.ENDC} Handshake Complete. Starting Simulation in 1s...")
+
+    if args.target_apogee is not None:
+        try:
+            _send_preflight_airbrake_target(link, float(args.target_apogee))
+        except ConnectionError as e:
+            print(f"\n{Colors.FAIL}[Error]{Colors.ENDC} Connection died while sending target apogee: {e}")
+            link.close()
+            stop_sitl_process()
+            sys.exit(1)
+        except Exception as e:
+            print(f"\n{Colors.FAIL}[Error]{Colors.ENDC} Failed to send target apogee command: {e}")
+            link.close()
+            stop_sitl_process()
+            sys.exit(1)
+
     time.sleep(1.0)
 
     # --- 5. Main Loop ---
