@@ -56,63 +56,11 @@ ENV_ALIASES = {
     "stm32": "stm32h723vehx",
 }
 
-ENV_TEMPLATES = {
-    "native": {
-        "env_name": "native",
-        "snippet": """; --- Astra Support: managed native env ---
-[env:native]
-platform = native
-test_build_src = yes
-lib_compat_mode = off
-lib_ldf_mode = chain+
-build_flags =
-  -std=c++17
-  -DNATIVE=1
-; --- Astra Support: end managed native env ---""",
-    },
-    "teensy41": {
-        "env_name": "teensy41",
-        "snippet": """; --- Astra Support: managed teensy41 env ---
-[env:teensy41]
-platform = teensy
-framework = arduino
-board = teensy41
-build_flags =
-  -D ENV_TEENSY
-; --- Astra Support: end managed teensy41 env ---""",
-    },
-    "esp32s3": {
-        "env_name": "esp32s3",
-        "snippet": """; --- Astra Support: managed esp32s3 env ---
-[env:esp32s3]
-platform = espressif32
-framework = arduino
-board = esp32-s3-devkitm-1
-build_unflags = -std=gnu++11
-build_flags =
-  -D ENV_ESP
-; --- Astra Support: end managed esp32s3 env ---""",
-    },
-    "stm32h723vehx": {
-        "env_name": "stm32h723vehx",
-        "snippet": """; --- Astra Support: managed stm32h723vehx env ---
-[env:stm32h723vehx]
-platform = ststm32
-framework = arduino
-board = stm32h723vehx
-board_build.variants_dir = custom_variants
-board_build.ldscript = ldscripts/ldscript.ld
-build_flags =
-  -D ENV_STM
-  -D STM32
-  -D ARDUINO_GENERIC_H723VEHX
-  -D USE_PWR_LDO_SUPPLY
-  -D PIO_FRAMEWORK_ARDUINO_ENABLE_CDC
-  -D USBCON
-  -D USE_USB_HS
-  -D USE_USB_HS_IN_FS
-; --- Astra Support: end managed stm32h723vehx env ---""",
-    },
+ENV_TEMPLATE_FILES = {
+    "native": "assets/envs/native.ini",
+    "teensy41": "assets/envs/teensy41.ini",
+    "esp32s3": "assets/envs/esp32s3.ini",
+    "stm32h723vehx": "assets/envs/stm32h723vehx.ini",
 }
 
 ENV_ASSET_DIRS = {
@@ -120,6 +68,10 @@ ENV_ASSET_DIRS = {
 }
 
 DEFAULT_INIT_ENVS = ["native", "teensy41", "esp32s3", "stm32h723vehx"]
+DEFAULT_GITIGNORE_PATTERNS = [
+    ".pio_native_verbose.log",
+    "sim_log_*.csv",
+]
 
 
 def _template_root() -> Path:
@@ -158,7 +110,7 @@ def _list_platformio_env_names(path: Path) -> set[str]:
 def _resolve_env_name(name: str) -> str:
     normalized = name.strip().lower()
     if normalized not in ENV_ALIASES:
-        supported = ", ".join(sorted(ENV_TEMPLATES.keys()))
+        supported = ", ".join(sorted(ENV_TEMPLATE_FILES.keys()))
         raise ValueError(f"Unsupported env '{name}'. Supported envs: {supported}")
     return ENV_ALIASES[normalized]
 
@@ -176,6 +128,19 @@ def _collect_requested_envs(values: list[str] | None) -> list[str]:
     return resolved
 
 
+def _read_env_template(env_key: str) -> str:
+    template_rel = ENV_TEMPLATE_FILES.get(env_key)
+    if not template_rel:
+        raise KeyError(f"No template registered for env '{env_key}'")
+
+    template_path = _template_root() / template_rel
+    if not template_path.exists():
+        raise FileNotFoundError(
+            f"Missing env template for '{env_key}': {template_path}"
+        )
+    return template_path.read_text(encoding="utf-8").rstrip()
+
+
 def _ensure_platformio_envs(project_root: Path, envs: list[str]) -> list[str]:
     platformio_path = project_root / "platformio.ini"
     existing_envs = _list_platformio_env_names(platformio_path)
@@ -184,11 +149,11 @@ def _ensure_platformio_envs(project_root: Path, envs: list[str]) -> list[str]:
     snippets_to_add: list[str] = []
     notes: list[str] = []
     for env_key in envs:
-        env_name = ENV_TEMPLATES[env_key]["env_name"]
+        env_name = env_key
         if env_name in existing_envs:
             notes.append(f"platformio.ini: [env:{env_name}] already present")
             continue
-        snippets_to_add.append(ENV_TEMPLATES[env_key]["snippet"])
+        snippets_to_add.append(_read_env_template(env_key))
         notes.append(f"platformio.ini: appended [env:{env_name}]")
 
     if snippets_to_add:
@@ -225,6 +190,28 @@ def _copy_assets_for_env(project_root: Path, env_key: str, overwrite: bool) -> l
     return [f"assets: {env_key} copied={copied} skipped={skipped}"]
 
 
+def _ensure_gitignore_patterns(project_root: Path, patterns: list[str]) -> list[str]:
+    gitignore_path = project_root / ".gitignore"
+    lines = (
+        gitignore_path.read_text(encoding="utf-8").splitlines()
+        if gitignore_path.exists()
+        else []
+    )
+
+    existing = {line.strip() for line in lines if line.strip()}
+    missing = [pattern for pattern in patterns if pattern not in existing]
+    if not missing:
+        return [".gitignore: SITL/native log patterns already present"]
+
+    if lines and lines[-1].strip():
+        lines.append("")
+    if "# Local native/SITL diagnostics" not in existing:
+        lines.append("# Local native/SITL diagnostics")
+    lines.extend(missing)
+    gitignore_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return [f".gitignore: added {', '.join(missing)}"]
+
+
 def _cmd_init(args: argparse.Namespace) -> int:
     project_root = Path(args.project).resolve()
     if not project_root.exists():
@@ -232,7 +219,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
     if args.list_envs:
         print("Supported envs:")
-        for env_name in sorted(ENV_TEMPLATES.keys()):
+        for env_name in sorted(ENV_TEMPLATE_FILES.keys()):
             print(f"- {env_name}")
         return 0
 
@@ -240,6 +227,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
     _write_text(project_root / ".astra-support.yml", DEFAULT_CONFIG, args.overwrite)
 
     notes: list[str] = []
+    notes.extend(_ensure_gitignore_patterns(project_root, DEFAULT_GITIGNORE_PATTERNS))
     if not args.skip_platformio_env:
         notes.extend(_ensure_platformio_envs(project_root, requested_envs))
 
@@ -280,14 +268,34 @@ def _cmd_test(args: argparse.Namespace) -> int:
     return run_tests.main(forward)
 
 
-def _cmd_hitl(args: argparse.Namespace) -> int:
-    from .tools import run_sim
-
-    forward = ["--project", args.project]
+def _passthrough_args(args: argparse.Namespace) -> list[str]:
     passthrough = list(getattr(args, "extras", []))
     if passthrough and passthrough[0] == "--":
         passthrough = passthrough[1:]
-    forward.extend(passthrough)
+    return passthrough
+
+
+def _cmd_sim(args: argparse.Namespace) -> int:
+    from .tools import run_sim
+
+    forward = ["--project", args.project]
+    forward.extend(_passthrough_args(args))
+    return run_sim.main(forward)
+
+
+def _cmd_sitl(args: argparse.Namespace) -> int:
+    from .tools import run_sim
+
+    forward = ["--project", args.project, "--mode", "sitl"]
+    forward.extend(_passthrough_args(args))
+    return run_sim.main(forward)
+
+
+def _cmd_hitl(args: argparse.Namespace) -> int:
+    from .tools import run_sim
+
+    forward = ["--project", args.project, "--mode", "hitl"]
+    forward.extend(_passthrough_args(args))
     return run_sim.main(forward)
 
 
@@ -296,6 +304,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"astra-support {__version__}")
     parser.add_argument(
         "--no-update-check",
+        "-U",
         action="store_true",
         help="Skip interactive CLI update checks for this invocation.",
     )
@@ -303,7 +312,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_init = sub.add_parser("init", help="Initialize a repo with Astra Support config/workflow")
-    p_init.add_argument("--project", default=".", help="Target repo path (default: .)")
+    p_init.add_argument("--project", "-C", default=".", help="Target repo path (default: .)")
     p_init.add_argument("--write-workflow", action="store_true", help="Write .github/workflows/run_unit_tests.yml")
     p_init.add_argument("--overwrite", action="store_true", help="Overwrite existing generated files")
     p_init.add_argument(
@@ -332,16 +341,36 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.set_defaults(func=_cmd_init)
 
     p_test = sub.add_parser("test", help="Run shared PlatformIO test runner")
-    p_test.add_argument("--project", default=".", help="Target repo path (default: .)")
-    p_test.add_argument("--no-progress", action="store_true")
-    p_test.add_argument("--no-install", action="store_true")
-    p_test.add_argument("--no-builds", action="store_true")
-    p_test.add_argument("--no-tests", action="store_true")
-    p_test.add_argument("--clean", action="store_true")
+    p_test.add_argument("--project", "-C", default=".", help="Target repo path (default: .)")
+    p_test.add_argument("--no-progress", "-P", action="store_true")
+    p_test.add_argument("--no-install", "-I", action="store_true")
+    p_test.add_argument("--no-builds", "-B", action="store_true")
+    p_test.add_argument("--no-tests", "-T", action="store_true")
+    p_test.add_argument("--clean", "-c", action="store_true")
     p_test.set_defaults(func=_cmd_test)
 
-    p_hitl = sub.add_parser("hitl", help="Run shared HITL/SITL simulation harness")
-    p_hitl.add_argument("--project", default=".", help="Target repo path (default: .)")
+    p_sim = sub.add_parser(
+        "sim",
+        aliases=["harness"],
+        help="Run shared HITL/SITL simulation harness (pass '-- --help' for sim flags)",
+    )
+    p_sim.add_argument("--project", "-C", default=".", help="Target repo path (default: .)")
+    p_sim.set_defaults(func=_cmd_sim)
+
+    p_sitl = sub.add_parser(
+        "sitl",
+        aliases=["sim-sitl"],
+        help="Run SITL simulation harness (mode preset; pass '-- --help' for sim flags)",
+    )
+    p_sitl.add_argument("--project", "-C", default=".", help="Target repo path (default: .)")
+    p_sitl.set_defaults(func=_cmd_sitl)
+
+    p_hitl = sub.add_parser(
+        "hitl",
+        aliases=["serial", "hw"],
+        help="Run HITL simulation harness (mode preset; pass '-- --help' for sim flags)",
+    )
+    p_hitl.add_argument("--project", "-C", default=".", help="Target repo path (default: .)")
     p_hitl.set_defaults(func=_cmd_hitl)
 
     return parser
@@ -352,7 +381,8 @@ def main(argv: list[str] | None = None) -> int:
     args, extras = parser.parse_known_args(argv)
     if maybe_prompt_for_update(no_update_check=args.no_update_check):
         return 0
-    if getattr(args, "func", None) is _cmd_hitl:
+    passthrough_funcs = {_cmd_sim, _cmd_sitl, _cmd_hitl}
+    if getattr(args, "func", None) in passthrough_funcs:
         args.extras = extras
     elif extras:
         parser.error(f"unrecognized arguments: {' '.join(extras)}")

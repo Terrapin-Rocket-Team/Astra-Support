@@ -74,7 +74,6 @@ class PhysicsSim(DataSource):
                 if not self.landed:
                     self.landed = True
                     self.landed_time = self.t
-                    print(f"[Sim] Landed at t={self.t:.2f}s")
 
         # Update dynamics
         self.vel += accel_z * self.dt
@@ -87,7 +86,6 @@ class PhysicsSim(DataSource):
             if not self.landed:
                 self.landed = True
                 self.landed_time = self.t
-                print(f"[Sim] Landed at t={self.t:.2f}s")
 
         # Accelerometer measures specific force (not inertial acceleration)
         accel_measured = -accel_z - 9.81

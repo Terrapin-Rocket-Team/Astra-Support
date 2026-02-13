@@ -4,7 +4,7 @@ Shared support repo for Astra-based projects.
 
 ## What this repo provides
 
-1. `astra-support` Python CLI (`init`, `test`, `hitl`) for reusable local/CI workflows.
+1. `astra-support` Python CLI (`init`, `test`, `sim`, `sitl`, `hitl`) for reusable local/CI workflows.
 2. Native PlatformIO mocks/shims (migrated from `NativeTestMocks`) at repo root.
 3. Shared simulation and flight datasets under `flight-data/`.
 
@@ -30,6 +30,10 @@ This writes:
   - `stm32h723vehx`
 - copies required STM32H723 assets (`custom_variants/`, `ldscripts/`) when the STM32 env is included
 
+Managed env snippets are file-based and editable in:
+
+- `src/astra_support/templates/project/assets/envs/`
+
 Choose envs explicitly (repeatable):
 
 ```bash
@@ -42,10 +46,25 @@ astra-support init --project . --env esp32s3 --env stm32h723vehx --env teensy41
 astra-support test --project .
 ```
 
-## Run HITL/SITL Harness (consumer repo)
+## Run Simulation Harness (consumer repo)
 
 ```bash
-astra-support hitl --project . -- --mode sitl --source physics
+astra-support sitl --project ../Astra --source physics
+```
+
+```bash
+astra-support sitl --project ../Astra --source NyxORK
+```
+
+```bash
+astra-support sim --project ../Astra --mode hitl --port COM3 --source physics
+```
+
+Shortcut form:
+
+```bash
+astra-support sitl -C ../Astra -s NyxORK
+astra-support test -C ../Astra -I -B -T -P
 ```
 
 ## CLI Self-Update Prompt

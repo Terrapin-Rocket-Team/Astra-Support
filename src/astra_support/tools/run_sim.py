@@ -7,12 +7,25 @@ import matplotlib.pyplot as plt
 import subprocess
 import os
 import platform
+from pathlib import Path
+
 try:
     from . import astra_link
     from . import astra_sim
 except ImportError:
     import astra_link  # type: ignore
     import astra_sim  # type: ignore
+
+def configure_console_output() -> None:
+    # Ensure UTF-8 output so Unicode UI glyphs render on Windows shells
+    # that default to cp1252.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
 
 # Terminal colors
 class Colors:
@@ -51,62 +64,225 @@ def parse_telem_header(header_line):
     col_map = {name: i for i, name in enumerate(parts)}
     return col_map, parts
 
+
+def _support_repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _source_alias_kind(source_text: str) -> str:
+    token = source_text.strip().lower()
+    if token in {"physics", "phys", "p"}:
+        return "physics"
+    if token in {"net", "network", "udp"}:
+        return "net"
+    if token in {"csv"}:
+        return "csv"
+    return "csv_path"
+
+
+def _iter_csv_files(root: Path):
+    if not root.exists():
+        return
+    for csv_path in root.rglob("*.csv"):
+        if csv_path.is_file():
+            yield csv_path
+
+
+def _list_builtin_csv_files(project_root: Path) -> list[Path]:
+    candidates: list[Path] = []
+    seen: set[str] = set()
+    for base in (
+        _support_repo_root() / "flight-data",
+        project_root / "flight-data",
+    ):
+        for csv_path in _iter_csv_files(base):
+            key = str(csv_path.resolve()).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(csv_path.resolve())
+    candidates.sort(key=lambda p: str(p).lower())
+    return candidates
+
+
+def _resolve_csv_source(source_text: str, project_root: Path) -> Path:
+    requested = source_text.strip().strip('"').strip("'")
+    source_path = Path(requested)
+    path_candidates: list[Path] = []
+    if source_path.is_absolute():
+        path_candidates.append(source_path)
+    else:
+        path_candidates.extend(
+            [
+                Path.cwd() / source_path,
+                project_root / source_path,
+                _support_repo_root() / source_path,
+            ]
+        )
+        if source_path.suffix.lower() != ".csv":
+            csv_guess = source_path.with_suffix(".csv")
+            path_candidates.extend(
+                [
+                    Path.cwd() / csv_guess,
+                    project_root / csv_guess,
+                    _support_repo_root() / csv_guess,
+                ]
+            )
+
+    resolved_seen: set[str] = set()
+    for candidate in path_candidates:
+        if candidate.is_file():
+            resolved = candidate.resolve()
+            key = str(resolved).lower()
+            if key in resolved_seen:
+                continue
+            resolved_seen.add(key)
+            return resolved
+
+    builtin_files = _list_builtin_csv_files(project_root)
+    requested_lower = source_path.name.lower()
+    requested_stem_lower = source_path.stem.lower()
+    matches: list[Path] = []
+    for candidate in builtin_files:
+        name_lower = candidate.name.lower()
+        stem_lower = candidate.stem.lower()
+        rel_lower = str(candidate).lower()
+        if requested_lower == name_lower:
+            matches.append(candidate)
+            continue
+        if requested_stem_lower and requested_stem_lower == stem_lower:
+            matches.append(candidate)
+            continue
+        if requested_lower and requested_lower in rel_lower:
+            matches.append(candidate)
+
+    unique_matches: list[Path] = []
+    seen_matches: set[str] = set()
+    for match in matches:
+        key = str(match.resolve()).lower()
+        if key in seen_matches:
+            continue
+        seen_matches.add(key)
+        unique_matches.append(match.resolve())
+
+    if len(unique_matches) == 1:
+        return unique_matches[0]
+    if len(unique_matches) > 1:
+        raise ValueError(
+            "Source is ambiguous. Matches:\n  - "
+            + "\n  - ".join(str(path) for path in unique_matches[:10])
+            + ("\n  - ..." if len(unique_matches) > 10 else "")
+        )
+
+    available = [path.name for path in builtin_files]
+    preview = ", ".join(sorted(available)[:12])
+    raise ValueError(
+        f"Could not resolve CSV source '{source_text}'. "
+        f"Checked local/project paths and built-in flight-data. "
+        f"Available built-in sims include: {preview}"
+        + ("..." if len(available) > 12 else "")
+    )
+
 def main(argv=None):
+    configure_console_output()
+
     parser = argparse.ArgumentParser(
         description="Astra Rocket Handshake Sim",
         epilog="""
 Examples:
-  # Basic SITL with CSV data (auto-starts SITL executable)
-  python run_sim.py --mode sitl --source csv --file flight.csv
+  # Basic SITL with internal physics
+  python run_sim.py --mode sitl --source physics
 
-  # SITL with custom executable path
-  python run_sim.py --mode sitl --source csv --file flight.csv --sitl-exe path/to/program.exe
+  # SITL with a specific CSV path
+  python run_sim.py --mode sitl --source flight-data/astra-rocket/raw/NyxORK.csv
 
-  # SITL without auto-start (start SITL executable manually)
-  python run_sim.py --mode sitl --source physics --no-auto-start
+  # SITL with a built-in sim name (no full path needed)
+  python run_sim.py --mode sitl --source NyxORK
 
   # HITL with random rotation (simulates tilted rail)
-  python run_sim.py --mode hitl --port COM3 --source csv --file flight.csv --rotate
+  python run_sim.py --mode hitl --port COM3 --source data_160_trimmed --rotate
 
   # With specific rotation and noise
   python run_sim.py --mode sitl --source physics --rotation 0 10 45 --noise
 
   # Custom noise levels for realistic hardware simulation
-  python run_sim.py --mode sitl --source csv --file flight.csv --noise --accel-noise 0.1 --baro-noise 1.0
+  python run_sim.py --mode sitl --source NyxORK --noise --accel-noise 0.1 --baro-noise 1.0
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument('--mode', choices=['hitl', 'sitl'], required=True, help="Connection mode")
-    parser.add_argument('--source', choices=['physics', 'csv', 'net'], default='physics', help="Data source")
-    parser.add_argument('--port', help="Serial port (HITL)")
-    parser.add_argument('--baud', type=int, default=115200, help="Baud rate")
-    parser.add_argument('--host', default='localhost', help="TCP Host (SITL)")
-    parser.add_argument('--tcp-port', type=int, default=5555, help="TCP Port (SITL)")
-    parser.add_argument('--file', help="CSV file path")
-    parser.add_argument('--udp-port', type=int, default=9000, help="External UDP port")
+    parser.add_argument('--mode', '-m', choices=['hitl', 'sitl'], required=True, help="Connection mode")
+    parser.add_argument(
+        '--source',
+        '-s',
+        default='physics',
+        metavar='physics|net|<file.csv>',
+        help=(
+            "Simulation source. Use 'physics' or 'net', or pass a CSV name/path "
+            "(e.g. NyxORK, data_160_trimmed.csv, or full path)."
+        ),
+    )
+    parser.add_argument('--port', '-p', help="Serial port (HITL)")
+    parser.add_argument('--baud', '-b', type=int, default=115200, help="Baud rate")
+    parser.add_argument('--host', '-H', default='localhost', help="TCP Host (SITL)")
+    parser.add_argument('--tcp-port', '-t', type=int, default=5555, help="TCP Port (SITL)")
+    parser.add_argument('--udp-port', '-u', type=int, default=9000, help="External UDP port")
     parser.add_argument(
         '--project',
+        '-C',
         default='.',
         help="Path to target PlatformIO project root (default: current directory)"
     )
 
     # SITL executable options
-    parser.add_argument('--sitl-exe', help="Path to SITL executable (default: .pio/build/native/program.exe)")
-    parser.add_argument('--no-auto-start', action='store_true', help="Don't auto-start SITL executable (manual start required)")
-    parser.add_argument('--build', action='store_true', help="Build native environment with 'pio run -e native' before running")
+    parser.add_argument('--sitl-exe', '-x', help="Path to SITL executable (default: .pio/build/native/program.exe)")
+    parser.add_argument('--no-auto-start', '-N', action='store_true', help="Don't auto-start SITL executable (manual start required)")
+    parser.add_argument('--show-sitl-output', '-v', action='store_true', help="Show child SITL process stdout/stderr inline")
+    parser.add_argument('--sitl-log', '-L', help="Child SITL output log path (default: <project>/.pio_native_verbose.log)")
+    parser.add_argument('--build', '-B', action='store_true', help="Build native environment with 'pio run -e native' before running")
+    parser.add_argument('--list-sims', '-l', action='store_true', help="List discovered built-in CSV simulations and exit")
 
     # Sensor simulation options
-    parser.add_argument('--rotate', action='store_true', help="Apply random rotation to sensor data (simulates tilted rail)")
-    parser.add_argument('--rotation', type=float, nargs=3, metavar=('ROLL', 'PITCH', 'YAW'),
+    parser.add_argument('--rotate', '-r', action='store_true', help="Apply random rotation to sensor data (simulates tilted rail)")
+    parser.add_argument('--rotation', '-R', type=float, nargs=3, metavar=('ROLL', 'PITCH', 'YAW'),
                        help="Apply specific rotation in degrees (e.g., --rotation 0 10 45)")
-    parser.add_argument('--noise', action='store_true', help="Add Gaussian noise to sensor data")
-    parser.add_argument('--accel-noise', type=float, default=0.05, help="Accelerometer noise std dev (m/s²), default=0.05")
-    parser.add_argument('--gyro-noise', type=float, default=0.01, help="Gyroscope noise std dev (rad/s), default=0.01")
-    parser.add_argument('--mag-noise', type=float, default=0.5, help="Magnetometer noise std dev (uT), default=0.5")
-    parser.add_argument('--baro-noise', type=float, default=0.5, help="Barometer noise std dev (hPa), default=0.5")
+    parser.add_argument('--noise', '-n', action='store_true', help="Add Gaussian noise to sensor data")
+    parser.add_argument('--accel-noise', '-a', type=float, default=0.05, help="Accelerometer noise std dev (m/s²), default=0.05")
+    parser.add_argument('--gyro-noise', '-g', type=float, default=0.01, help="Gyroscope noise std dev (rad/s), default=0.01")
+    parser.add_argument('--mag-noise', '-j', type=float, default=0.5, help="Magnetometer noise std dev (uT), default=0.5")
+    parser.add_argument('--baro-noise', '-z', type=float, default=0.5, help="Barometer noise std dev (hPa), default=0.5")
 
     args = parser.parse_args(argv)
-    project_root = os.path.abspath(args.project)
+    project_root = Path(args.project).resolve()
+
+    if args.list_sims:
+        sims = _list_builtin_csv_files(project_root)
+        if not sims:
+            print("No built-in CSV simulations found.")
+            return 1
+        print("Available built-in CSV simulations:")
+        support_root = _support_repo_root()
+        for sim_path in sims:
+            try:
+                rel = sim_path.relative_to(support_root)
+                display = str(rel)
+            except ValueError:
+                display = str(sim_path)
+            print(f"  - {sim_path.stem:<20} ({display})")
+        return 0
+
+    source_kind = _source_alias_kind(args.source)
+    resolved_csv_file: Path | None = None
+    try:
+        if source_kind in {"csv", "csv_path"}:
+            if source_kind == "csv":
+                parser.error(
+                    "CSV source now uses only --source <file.csv>. "
+                    "Example: --source NyxORK or --source flight-data/astra-rocket/raw/NyxORK.csv"
+                )
+            resolved_csv_file = _resolve_csv_source(args.source, project_root)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     auto_started_sitl = args.mode == 'sitl' and not args.no_auto_start
     connect_timeout_s = 20.0 if auto_started_sitl else None
     handshake_timeout_s = 20.0 if auto_started_sitl else None
@@ -141,6 +317,27 @@ Examples:
 
     # --- 1. Start SITL Executable (if needed) ---
     sitl_process = None
+    sitl_log_handle = None
+
+    def stop_sitl_process() -> None:
+        nonlocal sitl_process
+        nonlocal sitl_log_handle
+        if sitl_process:
+            print(f"{Colors.OKCYAN}[SITL]{Colors.ENDC} Terminating SITL process...")
+            sitl_process.terminate()
+            try:
+                sitl_process.wait(timeout=5.0)
+                print(f"{Colors.OKGREEN}[SITL]{Colors.ENDC} Process terminated gracefully")
+            except subprocess.TimeoutExpired:
+                print(f"{Colors.WARNING}[SITL]{Colors.ENDC} Process did not terminate, killing...")
+                sitl_process.kill()
+                sitl_process.wait()
+            sitl_process = None
+
+        if sitl_log_handle:
+            sitl_log_handle.close()
+            sitl_log_handle = None
+
     if auto_started_sitl:
         # Determine SITL executable path
         if args.sitl_exe:
@@ -158,14 +355,25 @@ Examples:
         if os.path.exists(sitl_exe_path):
             print(f"{Colors.OKCYAN}[SITL]{Colors.ENDC} Starting executable: {Colors.BOLD}{sitl_exe_path}{Colors.ENDC}")
             try:
+                popen_kwargs = {"cwd": project_root}
+                if args.show_sitl_output:
+                    print(f"{Colors.GRAY}[SITL]{Colors.ENDC} Child process output: {Colors.BOLD}inline{Colors.ENDC}")
+                else:
+                    sitl_log_path = Path(args.sitl_log).resolve() if args.sitl_log else project_root / ".pio_native_verbose.log"
+                    sitl_log_handle = open(sitl_log_path, "a", encoding="utf-8")
+                    popen_kwargs["stdout"] = sitl_log_handle
+                    popen_kwargs["stderr"] = subprocess.STDOUT
+                    print(f"{Colors.GRAY}[SITL]{Colors.ENDC} Child process output: {Colors.BOLD}{sitl_log_path}{Colors.ENDC}")
+
                 sitl_process = subprocess.Popen(
                     [sitl_exe_path],
-                    cwd=project_root
+                    **popen_kwargs
                 )
                 print(f"{Colors.OKGREEN}[SITL]{Colors.ENDC} Process started (PID: {Colors.BOLD}{sitl_process.pid}{Colors.ENDC})")
-                # Give it a moment to start up
-                time.sleep(1.0)
             except Exception as e:
+                if sitl_log_handle:
+                    sitl_log_handle.close()
+                    sitl_log_handle = None
                 print(f"{Colors.WARNING}[SITL]{Colors.ENDC} Warning: Could not start executable: {e}")
                 print(f"{Colors.WARNING}[SITL]{Colors.ENDC} Please start the SITL executable manually")
         else:
@@ -186,24 +394,22 @@ Examples:
             print(f"{Colors.OKGREEN}[Link]{Colors.ENDC} Connected!")
     except Exception as e:
         print(f"{Colors.FAIL}Connection Failed: {e}{Colors.ENDC}")
-        if sitl_process:
-            print(f"{Colors.OKCYAN}[SITL]{Colors.ENDC} Terminating SITL process...")
-            sitl_process.terminate()
-            sitl_process.wait()
+        stop_sitl_process()
         sys.exit(1)
 
     # --- 3. Setup Source ---
     try:
-        if args.source == 'csv':
-            if not args.file: raise ValueError("--file required for CSV mode")
-            print(f"{Colors.OKCYAN}[Sim]{Colors.ENDC} Loading CSV file: {Colors.BOLD}{args.file}{Colors.ENDC}")
-            base_sim = astra_sim.CSVSim(args.file)
-        elif args.source == 'net':
+        if source_kind == 'net':
             print(f"{Colors.OKCYAN}[Sim]{Colors.ENDC} Starting Network Stream on port {Colors.BOLD}{args.udp_port}{Colors.ENDC}")
             base_sim = astra_sim.NetworkStreamSim(args.udp_port)
-        else:
+        elif source_kind == 'physics':
             print(f"{Colors.OKCYAN}[Sim]{Colors.ENDC} Starting Physics Simulation")
             base_sim = astra_sim.PhysicsSim()
+        else:
+            if resolved_csv_file is None:
+                raise ValueError("CSV source could not be resolved.")
+            print(f"{Colors.OKCYAN}[Sim]{Colors.ENDC} Loading CSV file: {Colors.BOLD}{resolved_csv_file}{Colors.ENDC}")
+            base_sim = astra_sim.CSVSim(str(resolved_csv_file))
 
         # Apply pad delay only for OpenRocket or PhysicsSim (not for real flight data)
         # Real flight data already starts at the right time
@@ -236,10 +442,7 @@ Examples:
     except Exception as e:
         print(f"{Colors.FAIL}Sim Setup Failed: {e}{Colors.ENDC}")
         link.close()
-        if sitl_process:
-            print(f"{Colors.OKCYAN}[SITL]{Colors.ENDC} Terminating SITL process...")
-            sitl_process.terminate()
-            sitl_process.wait()
+        stop_sitl_process()
         sys.exit(1)
 
     # --- 4. Handshake Phase ---
@@ -273,26 +476,17 @@ Examples:
     except KeyboardInterrupt:
         print(f"\n{Colors.WARNING}[Init]{Colors.ENDC} Interrupted by user during handshake.")
         link.close()
-        if sitl_process:
-            print(f"{Colors.OKCYAN}[SITL]{Colors.ENDC} Terminating SITL process...")
-            sitl_process.terminate()
-            sitl_process.wait()
+        stop_sitl_process()
         sys.exit(0)
     except TimeoutError as e:
         print(f"\n{Colors.FAIL}[Error]{Colors.ENDC} Handshake timeout: {e}")
         link.close()
-        if sitl_process:
-            print(f"{Colors.OKCYAN}[SITL]{Colors.ENDC} Terminating SITL process...")
-            sitl_process.terminate()
-            sitl_process.wait()
+        stop_sitl_process()
         sys.exit(1)
     except ConnectionError as e:
         print(f"\n{Colors.FAIL}[Error]{Colors.ENDC} Connection died during handshake: {e}")
         link.close()
-        if sitl_process:
-            print(f"{Colors.OKCYAN}[SITL]{Colors.ENDC} Terminating SITL process...")
-            sitl_process.terminate()
-            sitl_process.wait()
+        stop_sitl_process()
         sys.exit(1)
 
     print(f"{Colors.OKGREEN}[Init]{Colors.ENDC} Handshake Complete. Starting Simulation in 1s...")
@@ -327,9 +521,14 @@ Examples:
     connection_alive = True
     run_failed = False
     consecutive_fc_timeouts = 0
-    sim_source_name = args.source.upper()
-    if args.source == 'csv' and args.file:
-        sim_source_name = f"CSV ({os.path.basename(args.file)})"
+    if source_kind == "physics":
+        sim_source_name = "PHYSICS"
+    elif source_kind == "net":
+        sim_source_name = "NET"
+    elif resolved_csv_file:
+        sim_source_name = f"CSV ({resolved_csv_file.name})"
+    else:
+        sim_source_name = args.source.upper()
 
     try:
         while connection_alive:
@@ -343,7 +542,7 @@ Examples:
 
             # A. Get Next Packet
             if sim.is_finished():
-                print(f"\n{Colors.OKGREEN}[Sim]{Colors.ENDC} CSV Finished. Exiting Loop.")
+                print(f"\n{Colors.OKGREEN}[Sim]{Colors.ENDC} Source finished. Exiting loop.")
                 break
 
             packet = sim.get_next_packet()
@@ -520,16 +719,7 @@ Examples:
         link.close()
 
         # Terminate SITL process if we started it
-        if sitl_process:
-            print(f"{Colors.OKCYAN}[SITL]{Colors.ENDC} Terminating SITL process...")
-            sitl_process.terminate()
-            try:
-                sitl_process.wait(timeout=5.0)
-                print(f"{Colors.OKGREEN}[SITL]{Colors.ENDC} Process terminated gracefully")
-            except subprocess.TimeoutExpired:
-                print(f"{Colors.WARNING}[SITL]{Colors.ENDC} Process did not terminate, killing...")
-                sitl_process.kill()
-                sitl_process.wait()
+        stop_sitl_process()
 
         print(f"\n{Colors.BOLD}{Colors.OKGREEN}Simulation Closed.{Colors.ENDC}")
         

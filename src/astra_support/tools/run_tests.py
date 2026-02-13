@@ -493,15 +493,17 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Run PlatformIO builds/tests with parallel execution.")
     parser.add_argument(
         "--project",
+        "-C",
         default=".",
         help="Path to the PlatformIO project root (default: current directory).",
     )
-    parser.add_argument("--no-progress", action="store_true", help="Disable progress bar updates (CI friendly).")
-    parser.add_argument("--no-install", action="store_true", help="Skip PlatformIO platform installation step.")
-    parser.add_argument("--no-builds", action="store_true", help="Skip environment build step.")
-    parser.add_argument("--no-tests", action="store_true", help="Skip test execution step.")
+    parser.add_argument("--no-progress", "-P", action="store_true", help="Disable progress bar updates (CI friendly).")
+    parser.add_argument("--no-install", "-I", action="store_true", help="Skip PlatformIO platform installation step.")
+    parser.add_argument("--no-builds", "-B", action="store_true", help="Skip environment build step.")
+    parser.add_argument("--no-tests", "-T", action="store_true", help="Skip test execution step.")
     parser.add_argument(
         "--clean",
+        "-c",
         action="store_true",
         help="Refresh per-env dependencies by running clean, 'pio pkg update -e <env>', then install.",
     )
