@@ -118,12 +118,28 @@ class CSVSim(DataSource):
             lines = f.readlines()
         
         header_index = -1; header_map = {}; converters = {}
-        keys = {'time': ['time', 'timestamp'], 'alt': ['altitude', 'pos_z', 'height', 'alt asl'],
-                'acc_x': ['bmi088 - acc x', 'acc x (m/s^2)', 'acceleration x', 'accel x'],
-                'acc_y': ['bmi088 - acc y', 'acc y (m/s^2)', 'acceleration y', 'accel y'],
-                'acc_z': ['bmi088 - acc z', 'acc z (m/s^2)', 'acceleration z', 'accel z', 'vertical acc'],
-                'truth_acc_z': ['truth accel', 'true accel', 'inertial accel'],
-                'pres': ['pressure', 'baro', 'pres'], 'temp': ['temperature', 'temp']}
+        keys = {
+            'time': ['time', 'timestamp'],
+            'alt': ['state - pz', 'pos_z', 'position z', 'altitude', 'alt asl', 'alt agl', 'height', 'disp z'],
+            'acc_x': ['accx', 'acc_x', 'acc x', 'acceleration x'],
+            'acc_y': ['accy', 'acc_y', 'acc y', 'acceleration y'],
+            'acc_z': ['accz', 'acc_z', 'acc z', 'acceleration z', 'vertical acc'],
+            'gyro_x': ['gyrox', 'gyro_x', 'gyro x'],
+            'gyro_y': ['gyroy', 'gyro_y', 'gyro y'],
+            'gyro_z': ['gyroz', 'gyro_z', 'gyro z'],
+            'mag_x': ['magx', 'mag_x', 'mag x'],
+            'mag_y': ['magy', 'mag_y', 'mag y'],
+            'mag_z': ['magz', 'mag_z', 'mag z'],
+            'lat': ['latitude', ' lat'],
+            'lon': ['longitude', ' lon'],
+            'gps_alt': ['gps - alt', 'gps alt', ' max-m10s - alt', 'mockgps - alt', 'alt (m)'],
+            'fix': ['fix quality', 'fix', 'gps fix'],
+            'sats': ['satellites', 'num sats', 'sats'],
+            'heading': ['heading', 'course'],
+            'truth_acc_z': ['truth accel', 'true accel', 'inertial accel'],
+            'pres': ['pressure', 'baro', 'pres'],
+            'temp': ['temperature', 'temp'],
+        }
 
         for i, line in enumerate(lines):
             clean_parts = [p.lower().replace('#','').replace('"','').strip() for p in line.split(',')]
@@ -140,6 +156,8 @@ class CSVSim(DataSource):
                             converters[key_type] = lambda x: x * 0.3048
                         elif key_type in ['acc_x', 'acc_y', 'acc_z'] and ('g' in col_name and 'mag' not in col_name):
                             converters[key_type] = lambda x: x * 9.80665
+                        elif key_type in ['gyro_x', 'gyro_y', 'gyro_z'] and ('deg' in col_name and 'rad' not in col_name):
+                            converters[key_type] = lambda x: x * np.pi / 180.0
 
             if 'time' in found_cols and 'alt' in found_cols:
                 header_index = i; header_map = found_cols
@@ -184,6 +202,12 @@ class CSVSim(DataSource):
                 sensor_x = get_val('acc_x')
                 sensor_y = get_val('acc_y')
                 sensor_z = get_val('acc_z')
+                gyro_x = get_val('gyro_x')
+                gyro_y = get_val('gyro_y')
+                gyro_z = get_val('gyro_z')
+                mag_x = get_val('mag_x')
+                mag_y = get_val('mag_y')
+                mag_z = get_val('mag_z')
 
                 # If OpenRocket format, add gravity to convert inertial accel -> specific force
                 # (typically gravity is on the Z axis)
@@ -192,9 +216,27 @@ class CSVSim(DataSource):
 
                 alt_val = get_val('alt')
                 truth_acc = get_val('truth_acc_z', 0.0)
-                self.data.append(PacketData(get_val('time'), np.array([sensor_x, sensor_y, sensor_z]), np.zeros(3), np.zeros(3),
-                                          get_val('pres', 1013.25), get_val('temp', 25.0), 45.0, -122.0, alt_val, 1, 8, 0.0,
-                                          truth_alt=alt_val, truth_accel=truth_acc))
+                lat_val = get_val('lat', 45.0)
+                lon_val = get_val('lon', -122.0)
+                gps_alt_val = get_val('gps_alt', alt_val)
+                fix_val = int(get_val('fix', 1.0))
+                sats_val = int(get_val('sats', 8.0))
+                heading_val = get_val('heading', 0.0)
+
+                self.data.append(PacketData(get_val('time'),
+                                            np.array([sensor_x, sensor_y, sensor_z]),
+                                            np.array([gyro_x, gyro_y, gyro_z]),
+                                            np.array([mag_x, mag_y, mag_z]),
+                                            get_val('pres', 1013.25),
+                                            get_val('temp', 25.0),
+                                            lat_val,
+                                            lon_val,
+                                            gps_alt_val,
+                                            fix_val,
+                                            sats_val,
+                                            heading_val,
+                                            truth_alt=alt_val,
+                                            truth_accel=truth_acc))
                 count += 1
             except: continue
         print(f"[Sim] Successfully loaded {count} rows.")

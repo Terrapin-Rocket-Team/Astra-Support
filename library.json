@@ -1,6 +1,6 @@
 {
   "name": "AstraSupportNativeMocks",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Native mocks/shims used by Astra-based libraries for PlatformIO native testing.",
   "keywords": "Astra, native, mocks, PlatformIO",
   "repository": {

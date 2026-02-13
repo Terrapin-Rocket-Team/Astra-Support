@@ -3,6 +3,8 @@ import time
 import sys
 import datetime
 import csv
+import importlib.util
+import inspect
 import matplotlib.pyplot as plt
 import subprocess
 import os
@@ -63,6 +65,16 @@ def parse_telem_header(header_line):
     parts = [p.strip() for p in raw.split(',')]
     col_map = {name: i for i, name in enumerate(parts)}
     return col_map, parts
+
+
+def _extract_fc_fields(current_values: list[str], fc_col_map) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    if not fc_col_map:
+        return fields
+    for key, idx in fc_col_map.items():
+        if idx < len(current_values):
+            fields[key] = current_values[idx]
+    return fields
 
 
 def _support_repo_root() -> Path:
@@ -183,6 +195,63 @@ def _resolve_csv_source(source_text: str, project_root: Path) -> Path:
         + ("..." if len(available) > 12 else "")
     )
 
+
+def _load_custom_sim_hooks(project_root: Path):
+    module_path = project_root / "astra_support_sim.py"
+    if not module_path.is_file():
+        return None, None
+
+    module_name = f"astra_support_custom_sim_{abs(hash(str(module_path.resolve())))}"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load module spec from {module_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    create_fn = getattr(module, "create_data_source", None)
+    list_fn = getattr(module, "list_sim_sources", None)
+
+    if create_fn is not None and not callable(create_fn):
+        raise TypeError(f"{module_path}: create_data_source must be callable")
+    if list_fn is not None and not callable(list_fn):
+        raise TypeError(f"{module_path}: list_sim_sources must be callable")
+
+    return create_fn, list_fn
+
+
+def _invoke_hook(func, available_kwargs: dict[str, object], positional_fallback: list[object]):
+    sig = inspect.signature(func)
+    params = list(sig.parameters.values())
+
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params):
+        return func(**available_kwargs)
+
+    keyword_candidates = [
+        p.name
+        for p in params
+        if p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    ]
+    if keyword_candidates:
+        kwargs = {name: available_kwargs[name] for name in keyword_candidates if name in available_kwargs}
+        required = [
+            p.name
+            for p in params
+            if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            and p.default is inspect._empty
+        ]
+        if all(name in kwargs for name in required):
+            return func(**kwargs)
+
+    positional_count = len(
+        [
+            p
+            for p in params
+            if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        ]
+    )
+    return func(*positional_fallback[:positional_count])
+
 def main(argv=None):
     configure_console_output()
 
@@ -218,7 +287,8 @@ Examples:
         metavar='physics|net|<file.csv>',
         help=(
             "Simulation source. Use 'physics' or 'net', or pass a CSV name/path "
-            "(e.g. NyxORK, data_160_trimmed.csv, or full path)."
+            "(e.g. NyxORK, data_160_trimmed.csv, or full path). "
+            "Optional project custom source hook: <project>/astra_support_sim.py"
         ),
     )
     parser.add_argument('--port', '-p', help="Serial port (HITL)")
@@ -253,27 +323,67 @@ Examples:
 
     args = parser.parse_args(argv)
     project_root = Path(args.project).resolve()
+    custom_create_fn = None
+    custom_list_fn = None
+
+    try:
+        custom_create_fn, custom_list_fn = _load_custom_sim_hooks(project_root)
+    except Exception as exc:
+        parser.error(f"Failed to load custom simulator module: {exc}")
 
     if args.list_sims:
         sims = _list_builtin_csv_files(project_root)
-        if not sims:
-            print("No built-in CSV simulations found.")
+        custom_sources = []
+        if custom_list_fn:
+            listed = _invoke_hook(
+                custom_list_fn,
+                {"project_root": project_root, "args": args},
+                [project_root, args],
+            )
+            if listed:
+                custom_sources = [str(item) for item in listed]
+
+        if not sims and not custom_sources:
+            print("No built-in or custom simulations found.")
             return 1
-        print("Available built-in CSV simulations:")
-        support_root = _support_repo_root()
-        for sim_path in sims:
-            try:
-                rel = sim_path.relative_to(support_root)
-                display = str(rel)
-            except ValueError:
-                display = str(sim_path)
-            print(f"  - {sim_path.stem:<20} ({display})")
+
+        if sims:
+            print("Available built-in CSV simulations:")
+            support_root = _support_repo_root()
+            for sim_path in sims:
+                try:
+                    rel = sim_path.relative_to(support_root)
+                    display = str(rel)
+                except ValueError:
+                    display = str(sim_path)
+                print(f"  - {sim_path.stem:<20} ({display})")
+
+        if custom_sources:
+            print("Available custom simulations:")
+            for source_name in custom_sources:
+                print(f"  - {source_name}")
         return 0
+
+    custom_sim = None
+    if custom_create_fn:
+        try:
+            custom_sim = _invoke_hook(
+                custom_create_fn,
+                {
+                    "source": args.source,
+                    "project_root": project_root,
+                    "astra_sim_module": astra_sim,
+                    "args": args,
+                },
+                [args.source, project_root, astra_sim, args],
+            )
+        except Exception as exc:
+            parser.error(f"Custom simulator error for source '{args.source}': {exc}")
 
     source_kind = _source_alias_kind(args.source)
     resolved_csv_file: Path | None = None
     try:
-        if source_kind in {"csv", "csv_path"}:
+        if custom_sim is None and source_kind in {"csv", "csv_path"}:
             if source_kind == "csv":
                 parser.error(
                     "CSV source now uses only --source <file.csv>. "
@@ -399,7 +509,10 @@ Examples:
 
     # --- 3. Setup Source ---
     try:
-        if source_kind == 'net':
+        if custom_sim is not None:
+            print(f"{Colors.OKCYAN}[Sim]{Colors.ENDC} Using custom simulator source: {Colors.BOLD}{args.source}{Colors.ENDC}")
+            base_sim = custom_sim
+        elif source_kind == 'net':
             print(f"{Colors.OKCYAN}[Sim]{Colors.ENDC} Starting Network Stream on port {Colors.BOLD}{args.udp_port}{Colors.ENDC}")
             base_sim = astra_sim.NetworkStreamSim(args.udp_port)
         elif source_kind == 'physics':
@@ -505,6 +618,9 @@ Examples:
         'sensor_alt': [],        # Altitude from pressure sensor (with noise if enabled)
         'fc_alt': [],            # KF estimate from flight computer
         'fc_stage': [],
+        'fc_flap_cmd_deg': [],   # FC desired flap angle from AirbrakeController
+        'fc_flap_actual_deg': [],# FC measured/actual flap angle
+        'fc_est_apogee_m': [],   # FC estimated/predicted apogee
         'fc_values': [],
         'truth_accel': [],       # Ground truth acceleration (from sim)
         'sensor_accel': [],      # Measured acceleration (from accel sensor)
@@ -521,7 +637,10 @@ Examples:
     connection_alive = True
     run_failed = False
     consecutive_fc_timeouts = 0
-    if source_kind == "physics":
+    sim_hook_warned = False
+    if custom_sim is not None:
+        sim_source_name = f"CUSTOM ({args.source})"
+    elif source_kind == "physics":
         sim_source_name = "PHYSICS"
     elif source_kind == "net":
         sim_source_name = "NET"
@@ -613,6 +732,9 @@ Examples:
             fc_alt_val = 0.0
             fc_accel_val = 0.0
             fc_stage_val = last_stage
+            fc_flap_cmd_deg = float("nan")
+            fc_flap_actual_deg = float("nan")
+            fc_est_apogee_m = float("nan")
             current_values = []
             fc_accel_x, fc_accel_y, fc_accel_z = 0.0, 0.0, 0.0
             fc_vel_x, fc_vel_y, fc_vel_z = 0.0, 0.0, 0.0
@@ -621,6 +743,21 @@ Examples:
             if fc_response_line:
                 raw_content = fc_response_line[6:].strip()
                 current_values = [x.strip() for x in raw_content.split(',')]
+
+                # Optional simulator feedback hook: allows custom simulators to
+                # ingest FC telemetry (e.g., commanded flap angle) for the next
+                # simulation step.
+                if hasattr(sim, "on_fc_telemetry"):
+                    try:
+                        fc_fields = _extract_fc_fields(current_values, fc_col_map)
+                        sim.on_fc_telemetry(fc_fields)
+                    except Exception as hook_error:
+                        if not sim_hook_warned:
+                            print(
+                                f"\n{Colors.WARNING}[Sim]{Colors.ENDC} "
+                                f"custom telemetry hook error: {hook_error}"
+                            )
+                            sim_hook_warned = True
 
                 if fc_col_map:
                     def get_fc(keys_list, default):
@@ -641,6 +778,33 @@ Examples:
                     fc_hitl_acc_y_str = get_fc(["HITL_Accelerometer - Acc Y (m/s^2)", "HITL Acc Y"], "0")
                     fc_hitl_acc_z_str = get_fc(["HITL_Accelerometer - Acc Z (m/s^2)", "HITL Acc Z"], "0")
                     temp_stage = get_fc(["State - Flight Stage", "Stage"], last_stage)
+                    fc_flap_cmd_str = get_fc(
+                        [
+                            "AirbrakeCtrl - Actuation Angle (deg)",
+                            "State - Actuation Angle (deg)",
+                            "Actuation Angle (deg)",
+                        ],
+                        "",
+                    )
+                    fc_flap_actual_str = get_fc(
+                        [
+                            "AirbrakeCtrl - Actual Angle (deg)",
+                            "State - Actual Angle (deg)",
+                            "State - Acutal Angle (deg)",
+                            "Actual Angle (deg)",
+                            "Acutal Angle (deg)",
+                        ],
+                        "",
+                    )
+                    fc_est_apogee_str = get_fc(
+                        [
+                            "AirbrakeCtrl - Pred Apogee (m)",
+                            "State - Est Apo (m)",
+                            "Pred Apogee (m)",
+                            "Est Apo (m)",
+                        ],
+                        "",
+                    )
                     if "-" in temp_stage: temp_stage = temp_stage.split('-')[-1].strip()
                     fc_stage_val = temp_stage
                     try: fc_alt_val = float(fc_alt_str)
@@ -667,6 +831,12 @@ Examples:
                     except: pass
                     try: fc_hitl_acc_z = float(fc_hitl_acc_z_str)
                     except: pass
+                    try: fc_flap_cmd_deg = float(fc_flap_cmd_str)
+                    except: pass
+                    try: fc_flap_actual_deg = float(fc_flap_actual_str)
+                    except: pass
+                    try: fc_est_apogee_m = float(fc_est_apogee_str)
+                    except: pass
 
             # D. Store & Display
             history['time'].append(packet.timestamp)
@@ -674,6 +844,9 @@ Examples:
             history['sensor_alt'].append(packet.alt)     # Altitude from sensors (with noise if enabled)
             history['fc_alt'].append(fc_alt_val)
             history['fc_stage'].append(fc_stage_val)
+            history['fc_flap_cmd_deg'].append(fc_flap_cmd_deg)
+            history['fc_flap_actual_deg'].append(fc_flap_actual_deg)
+            history['fc_est_apogee_m'].append(fc_est_apogee_m)
             history['fc_values'].append(current_values)
             history['truth_accel'].append(packet.truth_accel if packet.truth_accel is not None else 0.0)  # Ground truth inertial accel
             history['sensor_accel'].append(packet.accel[2])  # Sensor measured specific force (z-axis)
@@ -701,7 +874,8 @@ Examples:
 
             # Format the row with better spacing
             time_str = f"{packet.timestamp:>8.2f}"
-            sim_alt_str = f"{packet.alt:>8.1f}"
+            sim_alt_display = packet.truth_alt if packet.truth_alt is not None else packet.alt
+            sim_alt_str = f"{sim_alt_display:>8.1f}"
             fc_alt_str = f"{fc_alt_val:>8.1f}"
 
             if is_event:
@@ -757,28 +931,62 @@ Examples:
         # --- Plot ---
         print(f"{Colors.OKCYAN}Plotting results...{Colors.ENDC}")
         try:
-            # Create single altitude plot
-            fig, ax_alt = plt.subplots(1, 1, figsize=(12, 8))
+            # Single airbrake graph:
+            # - left axis: desired/actual flap angle
+            # - right axis: estimated apogee (and optional FC altitude for context)
+            fig, ax_ab = plt.subplots(1, 1, figsize=(12, 8))
+            ax_apo = ax_ab.twinx()
 
-            # ===== ALTITUDE PLOT =====
-            ax_alt.plot(history['time'], history['sim_alt'],
-                        label='Ground Truth', color='black', linewidth=2.5, alpha=0.6)
-            ax_alt.plot(history['time'], history['sensor_alt'],
-                        label='Raw Sensor Data', color='gray', linewidth=1, alpha=0.4)
-            clean_fc = [x if x != 0 else None for x in history['fc_alt']]
-            ax_alt.plot(history['time'], clean_fc,
-                        label='FC Estimate (KF)', color='orange', linewidth=2, linestyle='--')
+            ax_ab.plot(
+                history['time'],
+                history['fc_flap_cmd_deg'],
+                label='Desired Flap Angle (deg)',
+                color='tab:blue',
+                linewidth=2,
+            )
+            ax_ab.plot(
+                history['time'],
+                history['fc_flap_actual_deg'],
+                label='Actual Flap Angle (deg)',
+                color='tab:green',
+                linewidth=2,
+                linestyle='--',
+            )
+            ax_ab.set_ylabel("Flap Angle (deg)", fontsize=10)
+            ax_ab.grid(True, which='both', linestyle='--', alpha=0.35)
+            ax_apo.plot(
+                history['time'],
+                history['fc_est_apogee_m'],
+                label='Estimated Apogee (m)',
+                color='tab:red',
+                linewidth=1.8,
+                alpha=0.9,
+            )
 
-            # ===== STAGE TRANSITIONS (on altitude plot) =====
+            # Keep FC altitude for context on same right axis.
+            clean_fc_alt = [x if x != 0 else None for x in history['fc_alt']]
+            ax_apo.plot(
+                history['time'],
+                clean_fc_alt,
+                label='FC Altitude (m)',
+                color='orange',
+                linewidth=1.3,
+                linestyle=':',
+                alpha=0.55,
+            )
+
+            # Stage transitions
             labeled_stages = set()
-            y_min, y_max = ax_alt.get_ylim()
-            if y_max < max(history['sim_alt']): y_max = max(history['sim_alt']) * 1.1
+            y_min, y_max = ax_apo.get_ylim()
+            sim_alt_max = max(history['sim_alt']) if history['sim_alt'] else y_max
+            if sim_alt_max > 0 and y_max < sim_alt_max:
+                y_max = sim_alt_max * 1.1
+                ax_apo.set_ylim(top=y_max)
 
             for i in range(1, len(history['fc_stage'])):
                 if history['fc_stage'][i] != history['fc_stage'][i-1]:
                     event_time = history['time'][i]
                     stage_val = history['fc_stage'][i]
-
                     try:
                         stage_num = int(stage_val)
                         stage_name, stage_color, _ = STAGE_NAMES.get(stage_num, (str(stage_num), 'blue', Colors.OKBLUE))
@@ -792,23 +1000,33 @@ Examples:
                     else:
                         labeled_stages.add(label)
 
-                    ax_alt.axvline(x=event_time, color=stage_color, linestyle='-',
-                                  linewidth=1.5, alpha=0.8, label=label)
-                    ax_alt.text(event_time, y_max * 0.95, f" {stage_name}",
-                               color=stage_color, rotation=90,
-                               verticalalignment='top', fontweight='bold', fontsize=9)
+                    ax_ab.axvline(
+                        x=event_time,
+                        color=stage_color,
+                        linestyle='-',
+                        linewidth=1.2,
+                        alpha=0.75,
+                        label=label,
+                    )
+                    ax_apo.text(
+                        event_time,
+                        y_max * 0.95 if y_max > 0 else 0.0,
+                        f" {stage_name}",
+                        color=stage_color,
+                        rotation=90,
+                        verticalalignment='top',
+                        fontweight='bold',
+                        fontsize=8,
+                    )
 
-            # Add unlabeled vertical lines at specific times
-            ax_alt.axvline(x=7.056, color='black', linestyle='--', linewidth=1, alpha=0.5)
-            ax_alt.axvline(x=9.238, color='black', linestyle='--', linewidth=1, alpha=0.5)
+            ax_ab.set_title("Airbrake Controller Telemetry", fontsize=12, fontweight='bold')
+            ax_apo.set_ylabel("Apogee / Altitude (m)", fontsize=10)
 
-            # Styling for altitude plot
-            ax_alt.set_title(f"Altitude & State Estimation", fontsize=12, fontweight='bold')
-            ax_alt.set_xlabel("Time (s)", fontsize=10)
-            ax_alt.set_ylabel("Altitude (m)", fontsize=10)
-            ax_alt.grid(True, which='both', linestyle='--', alpha=0.4)
-            ax_alt.legend(loc='best', fontsize=9, framealpha=0.9)
-            ax_alt.set_ylim(top=y_max)
+            ab_handles, ab_labels = ax_ab.get_legend_handles_labels()
+            apo_handles, apo_labels = ax_apo.get_legend_handles_labels()
+            ax_ab.legend(ab_handles + apo_handles, ab_labels + apo_labels, loc='best', fontsize=9, framealpha=0.9)
+
+            ax_ab.set_xlabel("Time (s)", fontsize=10)
 
             # Overall figure title
             fig.suptitle(f"Flight Data Analysis - Source: {sim_source_name}",

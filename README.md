@@ -60,6 +60,17 @@ astra-support sitl --project ../Astra --source NyxORK
 astra-support sim --project ../Astra --mode hitl --port COM3 --source physics
 ```
 
+Project-specific custom simulators are supported by adding
+`astra_support_sim.py` to the consumer project root (`--project` path) with:
+
+- `create_data_source(source, project_root, astra_sim_module, args=None)` returning a
+  DataSource instance or `None`
+- optional `list_sim_sources(project_root, args=None)` for `--list-sims`
+
+Custom DataSource objects can also implement:
+
+- `on_fc_telemetry(fields: dict[str, str])` to consume FC `TELEM/` values each lock-step cycle
+
 Shortcut form:
 
 ```bash
@@ -87,4 +98,5 @@ https://github.com/Terrapin-Rocket-Team/Astra-Support.git#main
 ## Notes
 
 - `docs/support-contract-v1.md` defines the cross-repo convention.
+- `docs/command-contract-v1.md` defines intended CLI usage and contributor expectations.
 - `flight-data/astra-rocket/manifest.yaml` tracks migrated datasets.
