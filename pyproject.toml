@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astra-support"
-version = "0.1.14"
+version = "0.1.15"
 description = "Shared support tooling for Astra-based libraries"
 readme = "README.md"
 requires-python = ">=3.10"
