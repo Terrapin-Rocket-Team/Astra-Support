@@ -371,6 +371,17 @@ Examples:
         default=None,
         help="Preflight airbrake target apogee in meters. Sends AB/TARGET_APOGEE before sim flight starts.",
     )
+    parser.add_argument(
+        '--real-time',
+        action='store_true',
+        help="HITL only: pace packet transmission to simulation timestamps instead of running as fast as possible.",
+    )
+    parser.add_argument(
+        '--time-scale',
+        type=float,
+        default=1.0,
+        help="Real-time pacing scale factor (HITL + --real-time). 1.0=real time, 2.0=2x faster, 0.5=half speed.",
+    )
 
     args = parser.parse_args(argv)
     project_root = Path(args.project).resolve()
@@ -742,6 +753,12 @@ Examples:
     }
     last_stage = "BOOT"
     pkt_count = 0
+    realtime_enabled = (args.mode == 'hitl' and args.real_time)
+    if args.time_scale <= 0.0:
+        parser.error("--time-scale must be > 0")
+    realtime_scale = args.time_scale
+    realtime_wall_start = None
+    realtime_sim_start = None
     
     connection_alive = True
     run_failed = False
@@ -776,6 +793,21 @@ Examples:
             packet = sim.get_next_packet()
             pkt_count += 1
             msg = packet.to_hitl_string().encode()
+
+            if realtime_enabled:
+                if realtime_wall_start is None:
+                    realtime_wall_start = time.monotonic()
+                    realtime_sim_start = packet.timestamp
+                sim_elapsed = packet.timestamp - realtime_sim_start
+                if sim_elapsed < 0:
+                    # Source jumped backwards; re-anchor timing to avoid long sleep/skew.
+                    realtime_wall_start = time.monotonic()
+                    realtime_sim_start = packet.timestamp
+                    sim_elapsed = 0.0
+                target_wall = realtime_wall_start + (sim_elapsed / realtime_scale)
+                sleep_s = target_wall - time.monotonic()
+                if sleep_s > 0:
+                    time.sleep(sleep_s)
 
             # B. Send & Wait (Retry Logic)
             attempts = 0
