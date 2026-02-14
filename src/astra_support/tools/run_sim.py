@@ -361,6 +361,11 @@ Examples:
         help="Command sent periodically in HITL mode to request readiness from FC.",
     )
     parser.add_argument(
+        '--header-probe',
+        default='CMD/HEADER\\n',
+        help="Command sent periodically to request TELEM header from FC.",
+    )
+    parser.add_argument(
         '--target-apogee',
         type=float,
         default=None,
@@ -619,7 +624,9 @@ Examples:
     ready_seen = False
     ready_token = args.ready_token.strip()
     ready_probe = args.ready_probe
+    header_probe = args.header_probe
     next_ready_probe_at = time.monotonic()
+    next_header_probe_at = time.monotonic()
     if require_ready:
         print(
             f"{Colors.OKCYAN}[Init]{Colors.ENDC} Waiting for readiness token: "
@@ -635,6 +642,16 @@ Examples:
                 raise TimeoutError(
                     f"Timed out waiting for TELEM header after {handshake_timeout_s:.1f}s from auto-started SITL process"
                 )
+
+            # Always request TELEM header during handshake.
+            if not fc_header_names and header_probe:
+                now = time.monotonic()
+                if now >= next_header_probe_at:
+                    try:
+                        link.send(header_probe.encode("utf-8"))
+                    except ConnectionError as e:
+                        raise ConnectionError(f"Connection died while requesting header: {e}") from e
+                    next_header_probe_at = now + 0.5
 
             if require_ready and not ready_seen and ready_probe:
                 now = time.monotonic()
