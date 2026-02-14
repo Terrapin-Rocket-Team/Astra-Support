@@ -356,6 +356,11 @@ Examples:
         help="Readiness marker expected from FC before simulation starts (HITL mode only).",
     )
     parser.add_argument(
+        '--ready-probe',
+        default='HITL/READY?\\n',
+        help="Command sent periodically in HITL mode to request readiness from FC.",
+    )
+    parser.add_argument(
         '--target-apogee',
         type=float,
         default=None,
@@ -613,6 +618,8 @@ Examples:
     require_ready = args.mode == 'hitl' and bool(args.ready_token.strip())
     ready_seen = False
     ready_token = args.ready_token.strip()
+    ready_probe = args.ready_probe
+    next_ready_probe_at = time.monotonic()
     if require_ready:
         print(
             f"{Colors.OKCYAN}[Init]{Colors.ENDC} Waiting for readiness token: "
@@ -628,6 +635,16 @@ Examples:
                 raise TimeoutError(
                     f"Timed out waiting for TELEM header after {handshake_timeout_s:.1f}s from auto-started SITL process"
                 )
+
+            if require_ready and not ready_seen and ready_probe:
+                now = time.monotonic()
+                if now >= next_ready_probe_at:
+                    try:
+                        link.send(ready_probe.encode("utf-8"))
+                    except ConnectionError as e:
+                        raise ConnectionError(f"Connection died while sending readiness probe: {e}") from e
+                    next_ready_probe_at = now + 0.5
+
             line = link.read_line()
             if line:
                 if require_ready and not ready_seen and ready_token in line:
