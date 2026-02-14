@@ -351,6 +351,11 @@ Examples:
     parser.add_argument('--mag-noise', '-j', type=float, default=0.5, help="Magnetometer noise std dev (uT), default=0.5")
     parser.add_argument('--baro-noise', '-z', type=float, default=0.5, help="Barometer noise std dev (hPa), default=0.5")
     parser.add_argument(
+        '--ready-token',
+        default='HITL READY',
+        help="Readiness marker expected from FC before simulation starts (HITL mode only).",
+    )
+    parser.add_argument(
         '--target-apogee',
         type=float,
         default=None,
@@ -605,7 +610,16 @@ Examples:
     if handshake_timeout_s is not None:
         handshake_deadline = time.monotonic() + handshake_timeout_s
 
-    # Wait for the header (with Ctrl+C support)
+    require_ready = args.mode == 'hitl' and bool(args.ready_token.strip())
+    ready_seen = False
+    ready_token = args.ready_token.strip()
+    if require_ready:
+        print(
+            f"{Colors.OKCYAN}[Init]{Colors.ENDC} Waiting for readiness token: "
+            f"{Colors.BOLD}{ready_token}{Colors.ENDC}"
+        )
+
+    # Wait for header (and readiness token in HITL mode) with Ctrl+C support
     try:
         while True:
             if sitl_process and sitl_process.poll() is not None:
@@ -615,12 +629,19 @@ Examples:
                     f"Timed out waiting for TELEM header after {handshake_timeout_s:.1f}s from auto-started SITL process"
                 )
             line = link.read_line()
-            if line and line.startswith("TELEM/") and ("State" in line or "Time" in line):
-                fc_col_map, fc_header_names = parse_telem_header(line)
-                if fc_header_names:
-                    print(f"{Colors.OKGREEN}[Init]{Colors.ENDC} Header Received! Found {Colors.BOLD}{len(fc_header_names)}{Colors.ENDC} columns.")
-                    print(f"{Colors.GRAY}[Init]{Colors.ENDC} Columns: {fc_header_names}")
-                break
+            if line:
+                if require_ready and not ready_seen and ready_token in line:
+                    ready_seen = True
+                    print(f"{Colors.OKGREEN}[Init]{Colors.ENDC} Readiness token received: {Colors.BOLD}{ready_token}{Colors.ENDC}")
+
+                if line.startswith("TELEM/") and ("State" in line or "Time" in line):
+                    fc_col_map, fc_header_names = parse_telem_header(line)
+                    if fc_header_names:
+                        print(f"{Colors.OKGREEN}[Init]{Colors.ENDC} Header Received! Found {Colors.BOLD}{len(fc_header_names)}{Colors.ENDC} columns.")
+                        print(f"{Colors.GRAY}[Init]{Colors.ENDC} Columns: {fc_header_names}")
+
+                if fc_header_names and (not require_ready or ready_seen):
+                    break
             time.sleep(0.01)  # Small sleep allows Ctrl+C to be detected
     except KeyboardInterrupt:
         print(f"\n{Colors.WARNING}[Init]{Colors.ENDC} Interrupted by user during handshake.")
@@ -1021,10 +1042,16 @@ Examples:
         # --- Plot ---
         print(f"{Colors.OKCYAN}Plotting results...{Colors.ENDC}")
         try:
-            # Single airbrake graph:
-            # - left axis: apogee/altitude (drives y-gridlines)
-            # - right axis: desired/actual flap angle
-            fig, ax_apo = plt.subplots(1, 1, figsize=(12, 8))
+            # Two-panel airbrake graph:
+            # - top: apogee/altitude + desired/actual flap angle
+            # - bottom: velocity in Mach (separate y-axis and scale)
+            fig, (ax_apo, ax_vel) = plt.subplots(
+                2,
+                1,
+                figsize=(12, 9),
+                sharex=True,
+                gridspec_kw={"height_ratios": [3, 1]},
+            )
             ax_ab = ax_apo.twinx()
 
             ax_apo.plot(
@@ -1110,6 +1137,39 @@ Examples:
             )
             ax_ab.set_ylabel("Flap Angle (deg)", fontsize=10)
 
+            # Plot signed Mach using FC Mach magnitude and FC vertical velocity sign.
+            # This keeps velocity direction information while using Mach units.
+            signed_mach = []
+            mach_vals = history.get('fc_mach', [])
+            vel_vec = history.get('fc_vel_vec', [])
+            n_points = min(len(history['time']), len(mach_vals), len(vel_vec))
+            for i in range(n_points):
+                m = mach_vals[i]
+                vec = vel_vec[i]
+                if not (isinstance(m, (int, float)) and m == m):
+                    signed_mach.append(float("nan"))
+                    continue
+                if isinstance(vec, (list, tuple)) and len(vec) >= 3:
+                    vz = vec[2]
+                    if isinstance(vz, (int, float)) and vz == vz:
+                        sign = -1.0 if vz < 0.0 else 1.0
+                        signed_mach.append(sign * abs(float(m)))
+                        continue
+                signed_mach.append(float("nan"))
+
+            ax_vel.plot(
+                history['time'][:n_points],
+                signed_mach,
+                label='Vertical Velocity (Mach, signed)',
+                color='tab:cyan',
+                linewidth=1.6,
+                alpha=0.95,
+            )
+            ax_vel.axhline(0.0, color='0.5', linestyle='--', linewidth=1.0, alpha=0.7)
+            ax_vel.set_ylabel("Velocity (Mach)", fontsize=10, color='tab:cyan')
+            ax_vel.tick_params(axis='y', colors='tab:cyan')
+            ax_vel.grid(True, which='both', linestyle='--', alpha=0.3)
+
             # Stage transitions
             labeled_stages = set()
             y_min, y_max = ax_apo.get_ylim()
@@ -1153,6 +1213,13 @@ Examples:
                         fontweight='bold',
                         fontsize=8,
                     )
+                    ax_vel.axvline(
+                        x=event_time,
+                        color=stage_color,
+                        linestyle='-',
+                        linewidth=1.0,
+                        alpha=0.35,
+                    )
 
             # Lockout release marker (first transition from active->inactive)
             lockout_vals = history.get('fc_transonic_lockout', [])
@@ -1186,14 +1253,29 @@ Examples:
                     fontweight='bold',
                     fontsize=8,
                 )
+                ax_vel.axvline(
+                    x=lockout_release_t,
+                    color='tab:olive',
+                    linestyle='--',
+                    linewidth=1.2,
+                    alpha=0.6,
+                )
 
             ax_apo.set_title("Airbrake Controller Telemetry", fontsize=12, fontweight='bold')
 
             ab_handles, ab_labels = ax_ab.get_legend_handles_labels()
             apo_handles, apo_labels = ax_apo.get_legend_handles_labels()
-            ax_apo.legend(ab_handles + apo_handles, ab_labels + apo_labels, loc='best', fontsize=9, framealpha=0.9)
+            vel_handles, vel_labels = ax_vel.get_legend_handles_labels()
+            ax_apo.legend(
+                ab_handles + apo_handles,
+                ab_labels + apo_labels,
+                loc='best',
+                fontsize=9,
+                framealpha=0.9,
+            )
+            ax_vel.legend(vel_handles, vel_labels, loc='best', fontsize=9, framealpha=0.9)
 
-            ax_apo.set_xlabel("Time (s)", fontsize=10)
+            ax_vel.set_xlabel("Time (s)", fontsize=10)
 
             # Overall figure title
             fig.suptitle(f"Flight Data Analysis - Source: {sim_source_name}",
