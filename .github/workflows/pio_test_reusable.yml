@@ -28,9 +28,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install dependencies
-        run: pip install --upgrade platformio pipx
+      - name: Install pipx
+        run: pip install --upgrade pipx
       - name: Install Astra Support
         run: pipx install "${{ inputs.support-install }}"
+      - name: Doctor project
+        run: astra-support doctor --project "${{ inputs.project-path }}"
       - name: Run tests
         run: astra-support test --project "${{ inputs.project-path }}" --no-progress --clean

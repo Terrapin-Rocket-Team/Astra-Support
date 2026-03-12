@@ -1,0 +1,1 @@
+"""Astra Support project configuration."""

@@ -1,8 +1,8 @@
 {
-  "name": "AstraSupportNativeMocks",
-  "version": "0.1.2",
-  "description": "Native mocks/shims used by Astra-based libraries for PlatformIO native testing.",
-  "keywords": "Astra, native, mocks, PlatformIO",
+  "name": "AstraSupportNativeSupport",
+  "version": "0.2.0",
+  "description": "Astra-specific native mocks, shims, and test support for PlatformIO projects.",
+  "keywords": "Astra, native, mocks, PlatformIO, support",
   "repository": {
     "type": "git",
     "url": "https://github.com/Terrapin-Rocket-Team/Astra-Support.git"
@@ -11,8 +11,8 @@
   "frameworks": "*",
   "platforms": "native",
   "build": {
-    "includeDir": ".",
-    "srcDir": ".",
+    "includeDir": "native-support/include",
+    "srcDir": "native-support/src",
     "srcFilter": [
       "-<*>",
       "+<Arduino.cpp>",
@@ -26,9 +26,10 @@
   "export": {
     "exclude": [
       ".github",
+      "datasets",
       "docs",
-      "flight-data",
       "src/astra_support",
+      "tests",
       "pyproject.toml"
     ]
   }
