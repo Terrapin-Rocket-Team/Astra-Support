@@ -3,11 +3,13 @@
 #include <iostream>
 #include <map>
 
+using steady_clock = std::chrono::steady_clock;
+
 static void spin_wait_us(uint64_t us)
 {
-    const auto start_point = std::chrono::steady_clock::now();
+    const auto start_point = steady_clock::now();
     while (std::chrono::duration_cast<std::chrono::microseconds>(
-               std::chrono::steady_clock::now() - start_point)
+               steady_clock::now() - start_point)
                .count() < static_cast<long long>(us)) {
     }
 }
@@ -132,6 +134,16 @@ Stream::~Stream()
 }
 
 void Stream::begin(int baud) {}
+void Stream::setTimeout(unsigned long timeout)
+{
+    timeoutMs = timeout;
+}
+
+unsigned long Stream::getTimeout() const
+{
+    return timeoutMs;
+}
+
 void Stream::end()
 {
     disconnectSITL();
@@ -223,12 +235,27 @@ int Stream::peek()
     return (uint8_t)inputBuffer[inputCursor];
 }
 
+int Stream::timedRead()
+{
+    const auto deadline = steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    while (true) {
+        int c = read();
+        if (c >= 0) {
+            return c;
+        }
+        if (steady_clock::now() >= deadline) {
+            return -1;
+        }
+        delayMicroseconds(100);
+    }
+}
+
 int Stream::readBytesUntil(char terminator, char *buffer, size_t length)
 {
     if (length < 1) return 0;
     size_t index = 0;
     while (index < length) {
-        int c = read();
+        int c = timedRead();
         if (c < 0) break;
         if (c == terminator) break;
         buffer[index++] = (char)c;
@@ -240,7 +267,7 @@ size_t Stream::readBytes(char *buffer, size_t length)
 {
     size_t count = 0;
     while (count < length) {
-        int c = read();
+        int c = timedRead();
         if (c < 0) break;
         buffer[count++] = (char)c;
     }
@@ -250,6 +277,19 @@ size_t Stream::readBytes(char *buffer, size_t length)
 size_t Stream::readBytes(uint8_t *buffer, size_t length)
 {
     return readBytes((char *)buffer, length);
+}
+
+String Stream::readStringUntil(char terminator)
+{
+    String ret = "";
+    while (true) {
+        int c = timedRead();
+        if (c < 0 || c == terminator) {
+            break;
+        }
+        ret += (char)c;
+    }
+    return ret;
 }
 
 size_t Stream::write(uint8_t b)

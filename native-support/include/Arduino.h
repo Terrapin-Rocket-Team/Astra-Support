@@ -207,6 +207,8 @@ public:
     ~Stream();
     void begin(int baud = 9600);
     void end();
+    void setTimeout(unsigned long timeout);
+    unsigned long getTimeout() const;
     void clearBuffer();
     virtual bool available();  // Mock - no data available
     virtual int peek();
@@ -233,26 +235,7 @@ public:
         return ret;
     }
 
-    String readStringUntil(char terminator) {
-        String ret = "";
-        unsigned long startTime = millis();
-        const unsigned long timeout = 1000; // 1 second timeout
-
-        while (millis() - startTime < timeout) {
-            int c = read();
-            if (c < 0) {
-                // No data available - yield and try again
-                delayMicroseconds(100);
-                continue;
-            }
-            if (c == terminator) {
-                // Found terminator - success
-                break;
-            }
-            ret += (char)c;
-        }
-        return ret;
-    }
+    String readStringUntil(char terminator);
 
     operator bool() { return true; }
 
@@ -272,7 +255,9 @@ public:
     int inputLength = 0;
 
 private:
+    int timedRead();
     SITLSocket* sitlSocket = nullptr;  // TCP connection to external simulator
+    unsigned long timeoutMs = 1000;
     void pollSITLInput();  // Poll for incoming data from simulator
 };
 

@@ -144,8 +144,9 @@ def _ensure_platformio_envs(project_root: Path, envs: list[str]) -> list[str]:
         notes.append(f"platformio.ini: appended [env:{env_name}]")
     if snippets:
         prefix = "\n\n" if existing_text and not existing_text.endswith("\n") else "\n" if existing_text else ""
+        appended_text = "\n\n".join(snippets).rstrip()
         platformio_path.write_text(
-            f"{existing_text}{prefix}{'\n\n'.join(snippets).rstrip()}\n",
+            f"{existing_text}{prefix}{appended_text}\n",
             encoding="utf-8",
         )
     return notes
