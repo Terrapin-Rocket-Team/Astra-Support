@@ -1,12 +1,12 @@
 # Astra-Support
 
-Shared support repo for Astra-based projects.
+Single-repo support platform for Astra-based projects.
 
 ## What this repo provides
 
-1. `astra-support` Python CLI (`init`, `test`, `sim`, `sitl`, `hitl`) for reusable local/CI workflows.
-2. Native PlatformIO mocks/shims (migrated from `NativeTestMocks`) at repo root.
-3. Shared simulation and flight datasets under `flight-data/`.
+1. `astra-support` Python CLI for diagnostics, project sync, testing, and simulation.
+2. `native-support/` PlatformIO-native mocks, shims, and Astra-specific test helpers.
+3. `datasets/` flight and simulation assets kept in-repo.
 
 ## Install CLI
 
@@ -14,31 +14,44 @@ Shared support repo for Astra-based projects.
 pipx install "git+https://github.com/Terrapin-Rocket-Team/Astra-Support.git@main"
 ```
 
-## Initialize a Consumer Repo
+This install now pulls all required Python dependencies (including PlatformIO,
+NumPy/SciPy, pyserial, and matplotlib), so `pipx inject ...` is no longer
+needed.
+
+You still need a system C++ compiler (`g++` or `clang++`) on `PATH` for native
+build/test flows. `astra-support test` and `astra-support sim --build` now run
+a preflight check and fail fast with actionable errors if PlatformIO or a C++
+compiler is missing.
+
+In interactive terminals, those commands can now offer to install missing tools
+for you (PlatformIO + compiler) using available package managers.
+
+To disable those prompts, set:
 
 ```bash
-astra-support init --project . --write-workflow
+ASTRA_SUPPORT_DISABLE_INSTALL_ASSIST=1
 ```
 
-This writes:
+## Core Commands
+
+```bash
+astra-support doctor --project .
+```
+
+```bash
+astra-support sync --project . --write-workflow
+```
+
+`sync` creates or refreshes:
+
 - `.astra-support.yml`
-- `.github/workflows/run_unit_tests.yml`
-- appends managed env blocks to `platformio.ini` for:
-  - `native`
-  - `teensy41`
-  - `esp32s3`
-  - `stm32h723vehx`
-- copies required STM32H723 assets (`custom_variants/`, `ldscripts/`) when the STM32 env is included
+- `.github/workflows/run_astra_support.yml`
+- managed env blocks in `platformio.ini`
+- packaged environment assets such as STM32 variants and linker scripts
 
-Managed env snippets are file-based and editable in:
+Managed env snippets live in:
 
-- `src/astra_support/templates/project/assets/envs/`
-
-Choose envs explicitly (repeatable):
-
-```bash
-astra-support init --project . --env esp32s3 --env stm32h723vehx --env teensy41
-```
+- `src/astra_support/assets/project/assets/envs/`
 
 ## Run Tests (consumer repo)
 
@@ -49,21 +62,21 @@ astra-support test --project .
 ## Run Simulation Harness (consumer repo)
 
 ```bash
-astra-support sitl --project ../Astra --source physics
+astra-support sim list --project ../Astra
 ```
 
 ```bash
-astra-support sitl --project ../Astra --source NyxORK
+astra-support sim run --project ../Astra --mode sitl --source physics
 ```
 
 Set an Airbrake preflight target apogee before flight packets begin:
 
 ```bash
-astra-support sitl --project ../Astra --source airbrake --target-apogee 8200
+astra-support sim run --project ../Astra --mode sitl --source NyxORK --target-apogee 8200
 ```
 
 ```bash
-astra-support sim --project ../Astra --mode hitl --port COM3 --source physics
+astra-support sim run --project ../Astra --mode hitl --port COM3 --source physics
 ```
 
 Project-specific custom simulators are supported by adding
@@ -71,7 +84,7 @@ Project-specific custom simulators are supported by adding
 
 - `create_data_source(source, project_root, astra_sim_module, args=None)` returning a
   DataSource instance or `None`
-- optional `list_sim_sources(project_root, args=None)` for `--list-sims`
+- optional `list_sim_sources(project_root, args=None)` for `astra-support sim list`
 
 Custom DataSource objects can also implement:
 
@@ -93,7 +106,13 @@ prompt to install them before continuing.
 - Disable globally: set `ASTRA_SUPPORT_DISABLE_UPDATE_CHECK=1`
 - Change check interval (seconds): `ASTRA_SUPPORT_UPDATE_CHECK_INTERVAL_SECONDS`
 
-## Use Native Mocks as PlatformIO dependency
+## Repo Layout
+
+- `native-support/` contains the C++ PlatformIO support library
+- `src/astra_support/` contains the standalone Python CLI
+- `datasets/` contains bundled sim and flight assets
+
+## Use Native Support as a PlatformIO dependency
 
 Add this to `lib_deps` in `platformio.ini`:
 
@@ -105,4 +124,4 @@ https://github.com/Terrapin-Rocket-Team/Astra-Support.git#main
 
 - `docs/support-contract-v1.md` defines the cross-repo convention.
 - `docs/command-contract-v1.md` defines intended CLI usage and contributor expectations.
-- `flight-data/astra-rocket/manifest.yaml` tracks migrated datasets.
+- `datasets/astra-rocket/manifest.yaml` tracks migrated datasets.

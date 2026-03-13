@@ -1,1 +1,1 @@
-"""Shared runner and simulation tools."""
+"""Compatibility wrappers for the old tool module paths."""

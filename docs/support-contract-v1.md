@@ -1,7 +1,7 @@
 # Astra Support Contract v1
 
-- Command surface is stable across repos: `astra-support init`, `astra-support test`, `astra-support sim`, `astra-support sitl`, `astra-support hitl`.
+- Command surface is owned by the CLI and currently centers on `astra-support doctor`, `astra-support sync`, `astra-support test`, and `astra-support sim ...`.
 - Consumer repos should expose `platformio.ini` at project root.
 - Native test environment name should be `native`.
 - Consumer CI should call the shared runner through `astra-support test --project .`.
-- Mocks are provided by this repo as a PlatformIO library dependency.
+- Native support helpers are provided by this repo as a PlatformIO library dependency.
