@@ -82,3 +82,14 @@ class CliTests(unittest.TestCase):
         self.assertFalse(hasattr(args, "mode"))
         forwarded = patched.call_args.args[0]
         self.assertEqual(forwarded.mode, "hitl")
+
+    def test_main_handles_keyboard_interrupt_cleanly(self):
+        with (
+            mock.patch.object(cli, "maybe_prompt_for_update", return_value=False),
+            mock.patch.object(cli.doctor_cmd, "run", side_effect=KeyboardInterrupt),
+            mock.patch("builtins.print") as patched_print,
+        ):
+            exit_code = cli.main(["doctor", "--project", "."])
+
+        self.assertEqual(exit_code, 130)
+        self.assertIn("Interrupted by user.", patched_print.call_args.args[0])

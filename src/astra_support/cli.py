@@ -8,6 +8,7 @@ from .commands import doctor as doctor_cmd
 from .commands import sim as sim_cmd
 from .commands import sync as sync_cmd
 from .commands import test as test_cmd
+from .console import Ansi, configure_console_output, paint
 from .self_update import maybe_prompt_for_update
 
 
@@ -191,8 +192,13 @@ def _compat_hitl(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    if maybe_prompt_for_update(no_update_check=args.no_update_check):
-        return 0
-    return int(args.func(args))
+    try:
+        parser = build_parser()
+        args = parser.parse_args(argv)
+        if maybe_prompt_for_update(no_update_check=args.no_update_check):
+            return 0
+        return int(args.func(args))
+    except KeyboardInterrupt:
+        configure_console_output()
+        print(paint("Interrupted by user.", Ansi.YELLOW))
+        return 130

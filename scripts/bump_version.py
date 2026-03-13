@@ -4,6 +4,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
+import time
 
 
 VERSION_LINE_RE = re.compile(
@@ -84,4 +85,5 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    time.sleep(30)  # Wait before modifying the file to allow pressing of the sync button before the file is changed
     raise SystemExit(main())
