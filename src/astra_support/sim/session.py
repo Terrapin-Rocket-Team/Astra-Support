@@ -33,8 +33,12 @@ def run_simulation(args, project_root: Path) -> int:
 
     try:
         if args.mode == "sitl":
+            link = TCPLink(host=args.host, port=args.tcp_port, auto_accept=False)
             sitl = _start_sitl_if_needed(args, project_root)
-            link = TCPLink(host=args.host, port=args.tcp_port, connect_timeout_s=20.0 if sitl else None)
+            link.wait_for_connection(
+                connect_timeout_s=20.0 if sitl else None,
+                on_wait=(lambda: sitl.ensure_running("SITL")) if sitl else None,
+            )
         else:
             if not args.port:
                 raise ValueError("--port is required in hitl mode")
@@ -161,10 +165,14 @@ def _create_builtin_sim(args, project_root: Path):
 def _start_sitl_if_needed(args, project_root: Path) -> SitlProcess | None:
     if args.no_auto_start:
         return None
-    executable = args.sitl_exe or str(default_sitl_executable(project_root))
+    executable = Path(args.sitl_exe).expanduser() if args.sitl_exe else default_sitl_executable(project_root)
+    if not executable.is_absolute():
+        executable = project_root / executable
+    executable = executable.resolve()
+    print(paint(f"Starting SITL: {executable}", Ansi.BLUE))
     sitl = SitlProcess(
         project_root,
-        executable,
+        str(executable),
         log_path=Path(args.sitl_log) if args.sitl_log else project_root / ".pio_native_verbose.log",
         echo_output=args.show_sitl_output,
     )

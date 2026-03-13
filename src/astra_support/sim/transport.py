@@ -51,6 +51,7 @@ class TCPLink(FlightComputerLink):
         host: str = '0.0.0.0',
         port: int = 5555,
         connect_timeout_s: Optional[float] = None,
+        auto_accept: bool = True,
     ):
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -59,8 +60,18 @@ class TCPLink(FlightComputerLink):
         self.server.settimeout(1.0)  # 1 second timeout for accept
 
         print(f"[Link] SITL Server listening on {host}:{port}...")
-        # Accept with timeout to allow Ctrl+C interruption
         self.conn = None
+        self._buffer = b''
+        if auto_accept:
+            self.wait_for_connection(connect_timeout_s=connect_timeout_s)
+
+    def wait_for_connection(
+        self,
+        connect_timeout_s: Optional[float] = None,
+        on_wait=None,
+    ) -> None:
+        if self.conn is not None:
+            return
         deadline = None
         if connect_timeout_s is not None and connect_timeout_s > 0:
             deadline = time.monotonic() + connect_timeout_s
@@ -72,23 +83,27 @@ class TCPLink(FlightComputerLink):
                     )
                 try:
                     self.conn, addr = self.server.accept()
-                    self.conn.setblocking(False) # Non-blocking for data transfer
+                    self.conn.setblocking(False)
                     print(f"[Link] Flight Software connected from {addr}")
                 except socket.timeout:
-                    # Timeout allows KeyboardInterrupt to be detected
+                    if on_wait is not None:
+                        on_wait()
                     continue
         except KeyboardInterrupt:
             self.server.close()
             raise ConnectionError("Connection interrupted by user")
-        self._buffer = b''
 
     def send(self, data: bytes):
+        if self.conn is None:
+            raise ConnectionError("TCP Connection has not been established")
         try:
             self.conn.sendall(data)
         except (BrokenPipeError, ConnectionResetError):
             raise ConnectionError("TCP Connection reset by peer")
 
     def read_line(self) -> Optional[str]:
+        if self.conn is None:
+            raise ConnectionError("TCP Connection has not been established")
         try:
             chunk = self.conn.recv(4096)
             if chunk == b'': 
@@ -109,5 +124,6 @@ class TCPLink(FlightComputerLink):
         return None
 
     def close(self):
-        if hasattr(self, 'conn'): self.conn.close()
+        if getattr(self, 'conn', None) is not None:
+            self.conn.close()
         self.server.close()
