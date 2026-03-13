@@ -42,7 +42,7 @@ public:
     }
 
     // Override update() to prevent recalculation when altitude is set directly
-    int update(double currentTime = -1) override
+    int update() override
     {
         if (read() != 0)
             return -1;
