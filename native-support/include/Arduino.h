@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <cmath>
 #include <chrono>
+#include <iomanip>
+#include <sstream>
 #else
 #include <stdint.h>
 #include <stdio.h>
@@ -26,10 +28,6 @@
 #define OUTPUT 0
 #define INPUT_PULLUP 2
 #define INPUT_PULLDOWN 3
-
-// Platform ADC configuration for testing
-#define PLATFORM_ADC_BITS 10
-#define PLATFORM_DEFAULT_REF_VOLTAGE 3.3
 
 #define A0 0
 
@@ -138,6 +136,12 @@ class SITLSocket;
 class String {
 private:
     std::string str;
+    template <typename T>
+    static std::string formatFloat(T value, unsigned int digits) {
+        std::ostringstream stream;
+        stream << std::fixed << std::setprecision(static_cast<int>(digits)) << value;
+        return stream.str();
+    }
 public:
     String() : str("") {}
     String(const char* s) : str(s ? s : "") {}
@@ -147,7 +151,9 @@ public:
     String(long n) : str(std::to_string(n)) {}
     String(unsigned long n) : str(std::to_string(n)) {}
     String(float f) : str(std::to_string(f)) {}
+    String(float f, unsigned int digits) : str(formatFloat(f, digits)) {}
     String(double d) : str(std::to_string(d)) {}
+    String(double d, unsigned int digits) : str(formatFloat(d, digits)) {}
 
     const char* c_str() const { return str.c_str(); }
     size_t length() const { return str.length(); }
