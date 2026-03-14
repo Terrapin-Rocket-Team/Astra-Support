@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
+import subprocess
 import sys
-from pathlib import Path
 import time
+from pathlib import Path
 
 
 VERSION_LINE_RE = re.compile(
@@ -57,6 +59,36 @@ def bump_project_version(text: str, part: str = "patch") -> tuple[str, str]:
     raise ValueError("Could not find [project] version in pyproject.toml")
 
 
+def spawn_detached_bump(path: str, part: str, delay_seconds: float) -> None:
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--path",
+        path,
+        "--part",
+        part,
+        "--delay-seconds",
+        str(delay_seconds),
+    ]
+    popen_kwargs = {
+        "args": command,
+        "cwd": str(Path.cwd()),
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+    }
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = (
+            subprocess.DETACHED_PROCESS
+            | subprocess.CREATE_NEW_PROCESS_GROUP
+            | subprocess.CREATE_NO_WINDOW
+        )
+    else:
+        popen_kwargs["start_new_session"] = True
+    subprocess.Popen(**popen_kwargs)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Bump the project version in pyproject.toml")
     parser.add_argument(
@@ -70,7 +102,25 @@ def main(argv: list[str] | None = None) -> int:
         default="patch",
         help="Semantic version component to increment",
     )
+    parser.add_argument(
+        "--delay-seconds",
+        type=float,
+        default=0.0,
+        help="Delay before applying the bump",
+    )
+    parser.add_argument(
+        "--detach",
+        action="store_true",
+        help="Spawn the bump in a detached background process and return immediately",
+    )
     args = parser.parse_args(argv)
+
+    if args.detach:
+        spawn_detached_bump(args.path, args.part, args.delay_seconds)
+        return 0
+
+    if args.delay_seconds > 0:
+        time.sleep(args.delay_seconds)
 
     path = Path(args.path)
     original_text = path.read_text(encoding="utf-8")
@@ -85,5 +135,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    time.sleep(30)  # Wait before modifying the file to allow pressing of the sync button before the file is changed
     raise SystemExit(main())

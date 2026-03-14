@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
-from scripts.bump_version import bump_project_version
+from scripts.bump_version import bump_project_version, main
 
 
 class BumpVersionTests(unittest.TestCase):
@@ -36,3 +37,20 @@ class BumpVersionTests(unittest.TestCase):
         self.assertEqual(new_version, "1.5.0")
         self.assertIn('[tool.example]\nversion = "9.9.9"', updated)
         self.assertIn('version = "1.5.0"', updated)
+
+    def test_main_detach_spawns_background_bump(self):
+        with mock.patch("scripts.bump_version.spawn_detached_bump") as patched_spawn:
+            exit_code = main(
+                [
+                    "--path",
+                    "pyproject.toml",
+                    "--part",
+                    "patch",
+                    "--delay-seconds",
+                    "30",
+                    "--detach",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        patched_spawn.assert_called_once_with("pyproject.toml", "patch", 30.0)

@@ -5,4 +5,4 @@ set -eu
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-python scripts/bump_version.py --path pyproject.toml --part patch
+python scripts/bump_version.py --path pyproject.toml --part patch --delay-seconds 30 --detach
