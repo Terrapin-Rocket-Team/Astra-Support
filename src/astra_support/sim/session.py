@@ -59,9 +59,15 @@ def run_simulation(args, project_root: Path) -> int:
                 first_timestamp = packet.timestamp
             _pace_packet(args, packet.timestamp, first_timestamp, start_wall)
             link.send(packet.to_hitl_string().encode("utf-8"))
-            response = _read_telem_response(link)
+            response = _read_telem_response(link, fc_header_names)
             current_values = response[6:].split(",") if response and response.startswith("TELEM/") else []
+            if _is_header_row(current_values, fc_header_names):
+                continue
             fields = extract_fc_fields(current_values, fc_col_map)
+            if fields.get("Time - Seconds") == "Time - Seconds":
+                continue
+            if fields.get("State - Flight Stage") == "State - Flight Stage":
+                continue
 
             if hasattr(custom_sim, "on_fc_telemetry"):
                 custom_sim.on_fc_telemetry(fields)
@@ -235,11 +241,15 @@ def _pace_packet(args, timestamp: float, first_timestamp: float, start_wall: flo
         time.sleep(remaining)
 
 
-def _read_telem_response(link) -> str:
+def _read_telem_response(link, fc_header_names: list[str] | None = None) -> str:
     deadline = time.time() + 1.0
     while time.time() < deadline:
         line = link.read_line()
         if line and line.startswith("TELEM/"):
+            values = line[6:].split(",")
+            if _is_header_row(values, fc_header_names):
+                time.sleep(0.01)
+                continue
             return line
         time.sleep(0.01)
     return ""
@@ -282,6 +292,18 @@ def _new_history() -> dict[str, list]:
         "fc_mach": [],
         "fc_values": [],
     }
+
+
+def _is_header_row(values: list[str], fc_header_names: list[str] | None) -> bool:
+    if not values:
+        return False
+    if values[0].strip() == "Time - Seconds":
+        return True
+    if not fc_header_names or len(values) < len(fc_header_names):
+        return False
+    normalized_values = [value.strip() for value in values[: len(fc_header_names)]]
+    normalized_headers = [name.strip() for name in fc_header_names]
+    return normalized_values == normalized_headers
 
 
 def _pick(fields: dict[str, str], names: list[str], default: str = "") -> str:
