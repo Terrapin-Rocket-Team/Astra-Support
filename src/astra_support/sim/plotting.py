@@ -19,6 +19,25 @@ def plot_history(history: dict[str, list], *, source_name: str) -> None:
         ax_alt.plot(history["time"], [_nan_to_none(value) for value in history["fc_target_apogee_m"]], label="Target apogee", color="tab:purple")
     ax_alt.set_ylabel("Altitude (m)")
     ax_alt.grid(True, linestyle="--", alpha=0.3)
+
+    stage_changes = _stage_changes(history)
+    for index, (timestamp, stage_value) in enumerate(stage_changes):
+        label = "Stage change" if index == 0 else None
+        for axis in (ax_alt, ax_ctrl):
+            axis.axvline(timestamp, color="tab:gray", linestyle="--", linewidth=1.0, alpha=0.45, label=label if axis is ax_alt else None)
+        ax_alt.annotate(
+            str(stage_value),
+            xy=(timestamp, 1.0),
+            xycoords=("data", "axes fraction"),
+            xytext=(2, -14),
+            textcoords="offset points",
+            rotation=90,
+            va="top",
+            ha="left",
+            fontsize=8,
+            color="tab:gray",
+        )
+
     ax_alt.legend(loc="best")
 
     if any(_is_number(value) for value in history["fc_flap_cmd_deg"]):
@@ -44,3 +63,15 @@ def _nan_to_none(value):
     if _is_number(value):
         return value
     return None
+
+
+def _stage_changes(history: dict[str, list]) -> list[tuple[float, object]]:
+    changes: list[tuple[float, object]] = []
+    last_stage = object()
+    for timestamp, stage_value in zip(history.get("time", []), history.get("fc_stage", [])):
+        if stage_value in ("", None, "unknown"):
+            continue
+        if stage_value != last_stage:
+            changes.append((timestamp, stage_value))
+            last_stage = stage_value
+    return changes
