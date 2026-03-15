@@ -27,6 +27,8 @@ def plot_history(history: dict[str, list], *, source_name: str) -> None:
 
     if any(_is_number(value) for value in sim_velocity):
         ax_vel.plot(history["time"], [_nan_to_none(value) for value in sim_velocity], label="Sim velocity", color="tab:green")
+    if any(_is_number(value) for value in history["fc_vel_z_mps"]):
+        ax_vel.plot(history["time"], [_nan_to_none(value) for value in history["fc_vel_z_mps"]], label="FC VZ", color="tab:orange")
     ax_vel.set_ylabel("Velocity (m/s)")
     ax_vel.grid(True, linestyle="--", alpha=0.3)
 
