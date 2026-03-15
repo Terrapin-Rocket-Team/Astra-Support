@@ -258,6 +258,35 @@ def _read_telem_response(link, fc_header_names: list[str] | None = None) -> str:
 def _record_packet(packet, fields: dict[str, str], current_values: list[str]) -> dict[str, object]:
     fc_alt = _coerce_float(_pick(fields, ["State - PZ (m)", "State - Alt (m)", "Alt (m)"]))
     fc_stage = _pick(fields, ["State - Flight Stage", "Stage"], "unknown")
+    fc_vel_z = _coerce_float(
+        _pick(
+            fields,
+            [
+                "State - VZ (m/s)",
+                "State - Vel Z (m/s)",
+                "State - Velocity Z (m/s)",
+                "Vertical velocity (m/s)",
+                "Velocity_Up",
+                "VZ (m/s)",
+            ],
+        )
+    )
+    fc_acc_z = _coerce_float(
+        _pick(
+            fields,
+            [
+                "State - AZ (m/s/s)",
+                "State - AZ (m/s^2)",
+                "State - Acc Z (m/s/s)",
+                "State - Acc Z (m/s^2)",
+                "State - Accel Z (m/s/s)",
+                "State - Accel Z (m/s^2)",
+                "Vertical acceleration (m/s^2)",
+                "AZ (m/s/s)",
+                "AZ (m/s^2)",
+            ],
+        )
+    )
     fc_flap_cmd = _coerce_float(_pick(fields, ["AirbrakeCtrl - Actuation Angle (deg)", "Actuation Angle (deg)"]))
     fc_flap_actual = _coerce_float(_pick(fields, ["AirbrakeCtrl - Actual Angle (deg)", "Actual Angle (deg)"]))
     fc_est_apogee = _coerce_float(_pick(fields, ["AirbrakeCtrl - Pred Apogee (m)", "Pred Apogee (m)", "Est Apo (m)"]))
@@ -266,9 +295,12 @@ def _record_packet(packet, fields: dict[str, str], current_values: list[str]) ->
     return {
         "time": packet.timestamp,
         "sim_alt": packet.truth_alt if packet.truth_alt is not None else packet.alt,
+        "sim_acc_mps2": packet.truth_accel if packet.truth_accel is not None else math.nan,
         "sensor_alt": packet.alt,
         "fc_alt": fc_alt,
         "fc_stage": fc_stage,
+        "fc_vel_z_mps": fc_vel_z,
+        "fc_acc_z_mps2": fc_acc_z,
         "fc_flap_cmd_deg": fc_flap_cmd,
         "fc_flap_actual_deg": fc_flap_actual,
         "fc_est_apogee_m": fc_est_apogee,
@@ -282,9 +314,12 @@ def _new_history() -> dict[str, list]:
     return {
         "time": [],
         "sim_alt": [],
+        "sim_acc_mps2": [],
         "sensor_alt": [],
         "fc_alt": [],
         "fc_stage": [],
+        "fc_vel_z_mps": [],
+        "fc_acc_z_mps2": [],
         "fc_flap_cmd_deg": [],
         "fc_flap_actual_deg": [],
         "fc_est_apogee_m": [],
@@ -311,6 +346,15 @@ def _pick(fields: dict[str, str], names: list[str], default: str = "") -> str:
         value = fields.get(name)
         if value not in (None, ""):
             return value
+    normalized_fields = {
+        _normalize_field_name(key): value
+        for key, value in fields.items()
+        if value not in (None, "")
+    }
+    for name in names:
+        value = normalized_fields.get(_normalize_field_name(name))
+        if value not in (None, ""):
+            return value
     return default
 
 
@@ -323,3 +367,11 @@ def _coerce_float(value: str) -> float:
 
 def _format_optional(value: float) -> str:
     return f"{value:8.1f}" if not math.isnan(value) else "     n/a"
+
+
+def _normalize_field_name(name: str) -> str:
+    normalized = " ".join(name.strip().lower().split())
+    normalized = normalized.replace("\u2013", "-").replace("\u2014", "-")
+    normalized = normalized.replace("\u00b2", "^2")
+    normalized = normalized.replace("m/s/s", "m/s^2")
+    return normalized
