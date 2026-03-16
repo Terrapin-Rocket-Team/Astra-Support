@@ -18,10 +18,9 @@ This install now pulls all required Python dependencies (including PlatformIO,
 NumPy/SciPy, pyserial, and matplotlib), so `pipx inject ...` is no longer
 needed.
 
-You still need a system C++ compiler (`g++` or `clang++`) on `PATH` for native
-build/test flows. `astra-support test` and `astra-support sim --build` now run
-a preflight check and fail fast with actionable errors if PlatformIO or a C++
-compiler is missing.
+You still need `g++` on `PATH` for native build/test flows. `astra-support test`
+and `astra-support sim --build` now run a preflight check and fail fast with
+actionable errors if PlatformIO or `g++` is missing.
 
 In interactive terminals, those commands can now offer to install missing tools
 for you (PlatformIO + compiler) using available package managers.

@@ -60,7 +60,6 @@ def _run_install_command(cmd: list[str]) -> bool:
 
 def _windows_cpp_candidate() -> str | None:
     candidates = [
-        Path(os.getenv("ProgramFiles", r"C:\Program Files")) / "LLVM" / "bin" / "clang++.exe",
         Path(r"C:\msys64\ucrt64\bin\g++.exe"),
         Path(r"C:\msys64\mingw64\bin\g++.exe"),
     ]
@@ -93,12 +92,22 @@ def resolve_platformio_command() -> list[str] | None:
 
 
 def resolve_cpp_compiler() -> str | None:
-    for compiler in ("g++", "clang++", "c++"):
-        if shutil.which(compiler):
-            return compiler
+    if shutil.which("g++"):
+        return "g++"
     if sys.platform == "win32":
         return _windows_cpp_candidate()
     return None
+
+
+def _windows_msys2_gpp_install_command() -> list[str]:
+    script = (
+        "$ErrorActionPreference='Stop'; "
+        "winget install -e --id MSYS2.MSYS2 --accept-source-agreements --accept-package-agreements; "
+        "$bash = 'C:\\msys64\\usr\\bin\\bash.exe'; "
+        "if (!(Test-Path $bash)) { throw 'MSYS2 bash not found after installation.' }; "
+        "& $bash -lc 'pacman -Sy --noconfirm mingw-w64-ucrt-x86_64-gcc'"
+    )
+    return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]
 
 
 def _platformio_install_commands() -> list[list[str]]:
@@ -114,24 +123,13 @@ def _cpp_install_commands() -> tuple[list[list[str]], str]:
     if system == "windows":
         if shutil.which("winget"):
             return (
-                [
-                    [
-                        "winget",
-                        "install",
-                        "-e",
-                        "--id",
-                        "LLVM.LLVM",
-                        "--accept-source-agreements",
-                        "--accept-package-agreements",
-                    ]
-                ],
-                "LLVM (clang++) via winget",
+                [_windows_msys2_gpp_install_command()],
+                "MSYS2 UCRT64 g++ via winget",
             )
-        if shutil.which("choco"):
-            return ([["choco", "install", "llvm", "-y"]], "LLVM (clang++) via chocolatey")
-        if shutil.which("scoop"):
-            return ([["scoop", "install", "llvm"]], "LLVM (clang++) via scoop")
-        return ([], "a package manager with LLVM/g++ package support (winget/choco/scoop)")
+        return (
+            [],
+            "MSYS2 UCRT64 g++ (install MSYS2, then run `pacman -Sy --noconfirm mingw-w64-ucrt-x86_64-gcc`)",
+        )
 
     if system == "darwin":
         if shutil.which("brew"):
@@ -161,7 +159,7 @@ def _cpp_install_commands() -> tuple[list[list[str]], str]:
         )
     if shutil.which("apk"):
         return ([ [*sudo, "apk", "add", "g++"] ], "g++ via apk")
-    return ([], "your distro package manager (install g++ or clang++)")
+    return ([], "your distro package manager (install g++)")
 
 
 def _offer_install(tool_name: str, commands: list[list[str]], method_label: str) -> bool:
@@ -205,9 +203,9 @@ def check_toolchain(
 
         if require_cpp and cpp_compiler is None:
             cpp_commands, cpp_method = _cpp_install_commands()
-            install_ok = _offer_install("C++ compiler (g++/clang++)", cpp_commands, cpp_method)
+            install_ok = _offer_install("C++ compiler (g++)", cpp_commands, cpp_method)
             if install_ok:
-                notes.append("C++ compiler installation command completed successfully.")
+                notes.append("g++ installation command completed successfully.")
             cpp_compiler = resolve_cpp_compiler()
 
     if require_platformio:
@@ -226,10 +224,10 @@ def check_toolchain(
         if cpp_compiler is None:
             errors.append(
                 "A C++ compiler is required but was not found. "
-                "Install g++ (or clang++) and ensure it is on PATH, then re-run the command."
+                "Install g++ and ensure it is on PATH, then re-run the command."
             )
         else:
-            notes.append(f"C++ compiler detected: `{cpp_compiler}`.")
+            notes.append(f"g++ detected: `{cpp_compiler}`.")
 
     return ToolchainStatus(
         platformio_cmd=platformio_cmd,

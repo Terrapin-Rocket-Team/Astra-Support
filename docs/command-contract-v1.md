@@ -44,7 +44,7 @@ Expected responsibilities:
 - discover envs from `platformio.ini`
 - validate required local toolchain before work starts:
   - PlatformIO CLI availability
-  - C++ compiler availability for native/unix flows
+  - `g++` availability for native/unix flows
 - in interactive terminals, may offer automatic installation attempts for
   missing prerequisites using available package managers
 - install/update platform dependencies
@@ -71,7 +71,7 @@ Expected responsibilities:
 - accept forwarded sim flags
 - require `--mode` (`hitl` or `sitl`)
 - run data source + link loop + reporting/logging
-- when `--build` is used, validate PlatformIO CLI and C++ compiler before build
+- when `--build` is used, validate PlatformIO CLI and `g++` before build
 - in interactive terminals, may offer automatic installation attempts for
   missing prerequisites when `--build` is used
 - optionally load project-local custom source hooks from
