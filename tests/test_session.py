@@ -12,7 +12,57 @@ from astra_support.sim import session
 
 
 class SessionTests(unittest.TestCase):
-    def test_create_builtin_sim_wraps_csv_source_with_noise(self):
+    def test_run_simulation_wraps_custom_source_with_noise(self):
+        class FinishedSim:
+            def is_finished(self):
+                return True
+
+        args = SimpleNamespace(
+            mode="sitl",
+            host="localhost",
+            tcp_port=5555,
+            project=".",
+            source="airbrake",
+            no_auto_start=False,
+            sitl_exe=None,
+            sitl_log=None,
+            show_sitl_output=False,
+            build=False,
+            header_probe="CMD/HEADER\n",
+            ready_token="",
+            ready_probe="",
+            target_apogee=None,
+            no_plot=True,
+            rotate=False,
+            rotation=None,
+            noise=True,
+            accel_noise=0.05,
+            gyro_noise=0.01,
+            mag_noise=0.5,
+            baro_noise=0.5,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            with (
+                mock.patch.object(session, "configure_console_output"),
+                mock.patch.object(session, "_build_native_if_requested"),
+                mock.patch.object(session, "load_custom_sim_hooks", return_value=(object(), None)),
+                mock.patch.object(session, "_create_custom_sim", return_value=FinishedSim()),
+                mock.patch.object(session, "_create_builtin_sim"),
+                mock.patch.object(session, "TCPLink"),
+                mock.patch.object(session, "_start_sitl_if_needed"),
+                mock.patch.object(session, "_handshake", return_value=({}, ["Time"])),
+                mock.patch.object(session, "write_sim_log"),
+                mock.patch.object(session, "plot_history"),
+                mock.patch.object(session.time, "strftime", return_value="20260101_000000"),
+                mock.patch.object(session.data_sources, "NoisySim", side_effect=lambda sim, **_: sim) as noisy_sim,
+            ):
+                session.run_simulation(args, project_root)
+
+        noisy_sim.assert_called_once()
+
+    def test_apply_sim_wrappers_wraps_csv_source_with_noise(self):
         args = SimpleNamespace(
             source="airbrake.csv",
             udp_port=9000,
@@ -30,7 +80,8 @@ class SessionTests(unittest.TestCase):
             csv_path = project_root / "airbrake.csv"
             csv_path.write_text("time,altitude\n0,0\n1,10\n", encoding="utf-8")
 
-            sim = session._create_builtin_sim(args, project_root)
+            base_sim = session._create_builtin_sim(args, project_root)
+            sim = session._apply_sim_wrappers(base_sim, args)
 
         self.assertIsInstance(sim, data_sources.NoisySim)
 

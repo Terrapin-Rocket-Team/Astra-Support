@@ -23,6 +23,7 @@ def run_simulation(args, project_root: Path) -> int:
     custom_create_fn, _ = load_custom_sim_hooks(project_root)
     custom_sim = _create_custom_sim(args, project_root, custom_create_fn)
     sim = custom_sim or _create_builtin_sim(args, project_root)
+    sim = _apply_sim_wrappers(sim, args)
 
     sitl = None
     link = None
@@ -156,18 +157,21 @@ def _create_builtin_sim(args, project_root: Path):
         sim = data_sources.PadDelaySim(base)
     else:
         sim = base
+    return sim
 
-    if args.rotate:
+
+def _apply_sim_wrappers(sim, args):
+    if getattr(args, "rotate", False):
         sim = data_sources.RotatedSim(sim)
-    elif args.rotation:
+    elif getattr(args, "rotation", None):
         sim = data_sources.RotatedSim(sim, rotation_deg=args.rotation)
-    if args.noise:
+    if getattr(args, "noise", False):
         sim = data_sources.NoisySim(
             sim,
-            accel_noise=args.accel_noise,
-            gyro_noise=args.gyro_noise,
-            mag_noise=args.mag_noise,
-            baro_noise=args.baro_noise,
+            accel_noise=getattr(args, "accel_noise", 0.05),
+            gyro_noise=getattr(args, "gyro_noise", 0.01),
+            mag_noise=getattr(args, "mag_noise", 0.5),
+            baro_noise=getattr(args, "baro_noise", 0.5),
         )
     return sim
 
