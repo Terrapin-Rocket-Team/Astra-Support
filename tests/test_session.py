@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from astra_support.sim import data_sources
+from astra_support.sim import data_sources
 from astra_support.sim import session
 
 
@@ -74,10 +75,12 @@ class SessionTests(unittest.TestCase):
 
     def test_record_packet_extracts_velocity_and_acceleration_fields_with_normalized_units(self):
         expected_alt = 321.0
+        expected_alt = 321.0
         packet = SimpleNamespace(
             timestamp=12.5,
             truth_alt=321.0,
             alt=320.5,
+            pressure=data_sources.pressure_from_msl_altitude(expected_alt),
             pressure=data_sources.pressure_from_msl_altitude(expected_alt),
             truth_accel=18.2,
         )
