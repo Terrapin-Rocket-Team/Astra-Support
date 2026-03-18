@@ -6,14 +6,14 @@ from pathlib import Path
 
 
 def write_sim_log(path: Path, history: dict[str, list], fc_header_names: list[str]) -> None:
-    sim_velocity = _derive_series_rate(history["time"], history["sim_alt"])
-    sim_accel = history["sim_acc_mps2"]
-    if not any(_is_number(value) for value in sim_accel):
-        sim_accel = _derive_series_rate(history["time"], sim_velocity)
+    real_velocity = _derive_series_rate(history["time"], history["sim_alt"])
+    real_accel = history["sim_acc_mps2"]
+    if not any(_is_number(value) for value in real_accel):
+        real_accel = _derive_series_rate(history["time"], real_velocity)
 
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        header = ["Sim_Time", "Sim_Alt", "Sim_Pressure_Alt_AGL", "Sim_Vel_Z_mps", "Sim_Accel_Z_mps2"]
+        header = ["Sim_Time", "Sim_Alt", "Sensor_Alt_AGL", "Sim_Vel_Z_mps", "Sim_Accel_Z_mps2", "Sensor_Accel_Z_mps2"]
         if fc_header_names:
             header.extend(fc_header_names)
         else:
@@ -23,9 +23,10 @@ def write_sim_log(path: Path, history: dict[str, list], fc_header_names: list[st
             row = [
                 timestamp,
                 history["sim_alt"][index],
-                history["sim_pressure_alt_agl_m"][index],
-                _nan_to_empty(sim_velocity[index]) if index < len(sim_velocity) else "",
-                _nan_to_empty(sim_accel[index]) if index < len(sim_accel) else "",
+                history["sensor_alt_agl_m"][index],
+                _nan_to_empty(real_velocity[index]) if index < len(real_velocity) else "",
+                _nan_to_empty(real_accel[index]) if index < len(real_accel) else "",
+                _nan_to_empty(history["sensor_acc_z_mps2"][index]) if index < len(history["sensor_acc_z_mps2"]) else "",
             ]
             fc_values = history["fc_values"][index]
             if fc_header_names:

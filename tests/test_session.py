@@ -12,6 +12,28 @@ from astra_support.sim import session
 
 
 class SessionTests(unittest.TestCase):
+    def test_create_builtin_sim_wraps_csv_source_with_noise(self):
+        args = SimpleNamespace(
+            source="airbrake.csv",
+            udp_port=9000,
+            rotate=False,
+            rotation=None,
+            noise=True,
+            accel_noise=0.05,
+            gyro_noise=0.01,
+            mag_noise=0.5,
+            baro_noise=0.5,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            csv_path = project_root / "airbrake.csv"
+            csv_path.write_text("time,altitude\n0,0\n1,10\n", encoding="utf-8")
+
+            sim = session._create_builtin_sim(args, project_root)
+
+        self.assertIsInstance(sim, data_sources.NoisySim)
+
     def test_run_simulation_listens_before_starting_sitl(self):
         events: list[str] = []
 
@@ -92,9 +114,24 @@ class SessionTests(unittest.TestCase):
         baseline = session._apply_pressure_altitude_baseline(record, math.nan)
 
         self.assertEqual(record["sim_alt"], 321.0)
-        self.assertAlmostEqual(record["sim_pressure_alt_agl_m"], 0.0, places=3)
+        self.assertAlmostEqual(record["sensor_alt_agl_m"], 0.0, places=3)
         self.assertEqual(record["sim_acc_mps2"], 18.2)
+        self.assertTrue(math.isnan(record["sensor_acc_z_mps2"]))
         self.assertEqual(record["fc_stage"], "BOOST")
         self.assertEqual(record["fc_vel_z_mps"], 87.4)
         self.assertEqual(record["fc_acc_z_mps2"], -4.6)
         self.assertAlmostEqual(baseline, expected_alt, places=3)
+
+    def test_record_packet_captures_sensor_acceleration_z(self):
+        packet = SimpleNamespace(
+            timestamp=0.5,
+            truth_alt=10.0,
+            alt=10.0,
+            pressure=data_sources.pressure_from_msl_altitude(10.0),
+            truth_accel=5.0,
+            accel=[0.2, -0.1, 12.34],
+        )
+
+        record = session._record_packet(packet, {}, [])
+
+        self.assertEqual(record["sensor_acc_z_mps2"], 12.34)

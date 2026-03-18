@@ -87,10 +87,12 @@ def run_simulation(args, project_root: Path) -> int:
                 last_stage = stage_value
             elif len(history["time"]) % 50 == 0:
                 sim_alt_text = f"{record['sim_alt']:8.1f}"
+                sensor_alt_text = _format_optional(record["sensor_alt_agl_m"])
                 fc_alt_text = _format_optional(record["fc_alt"])
                 print(
                     f"{paint(f'{packet.timestamp:8.2f}s', Ansi.DIM)} "
-                    f"sim_alt={paint(sim_alt_text, Ansi.CYAN)} "
+                    f"real_alt={paint(sim_alt_text, Ansi.CYAN)} "
+                    f"sensor_alt={paint(sensor_alt_text, Ansi.BLUE)} "
                     f"fc_alt={paint(fc_alt_text, Ansi.YELLOW)} "
                     f"stage={paint(str(stage_value), Ansi.GRAY)}"
                 )
@@ -259,9 +261,10 @@ def _read_telem_response(link, fc_header_names: list[str] | None = None) -> str:
 
 def _record_packet(packet, fields: dict[str, str], current_values: list[str]) -> dict[str, object]:
     sim_alt = packet.truth_alt if packet.truth_alt is not None else packet.alt
-    sim_pressure_alt_agl_m = data_sources.pressure_to_msl_altitude(packet.pressure)
-    if math.isnan(sim_pressure_alt_agl_m):
-        sim_pressure_alt_agl_m = packet.alt
+    sensor_alt_agl_m = data_sources.pressure_to_msl_altitude(packet.pressure)
+    if math.isnan(sensor_alt_agl_m):
+        sensor_alt_agl_m = packet.alt
+    sensor_acc_z_mps2 = _sensor_accel_z(packet)
     fc_alt = _coerce_float(_pick(fields, ["State - PZ (m)", "State - Alt (m)", "Alt (m)"]))
     fc_stage = _pick(fields, ["State - Flight Stage", "Stage"], "unknown")
     fc_vel_z = _coerce_float(
@@ -301,8 +304,9 @@ def _record_packet(packet, fields: dict[str, str], current_values: list[str]) ->
     return {
         "time": packet.timestamp,
         "sim_alt": sim_alt,
-        "sim_pressure_alt_agl_m": sim_pressure_alt_agl_m,
+        "sensor_alt_agl_m": sensor_alt_agl_m,
         "sim_acc_mps2": packet.truth_accel if packet.truth_accel is not None else math.nan,
+        "sensor_acc_z_mps2": sensor_acc_z_mps2,
         "sensor_alt": packet.alt,
         "fc_alt": fc_alt,
         "fc_stage": fc_stage,
@@ -318,12 +322,12 @@ def _record_packet(packet, fields: dict[str, str], current_values: list[str]) ->
 
 
 def _apply_pressure_altitude_baseline(record: dict[str, object], baseline_m: float) -> float:
-    pressure_alt = record.get("sim_pressure_alt_agl_m")
+    pressure_alt = record.get("sensor_alt_agl_m")
     if not isinstance(pressure_alt, (int, float)) or math.isnan(pressure_alt):
         return baseline_m
     if math.isnan(baseline_m):
         baseline_m = float(pressure_alt)
-    record["sim_pressure_alt_agl_m"] = float(pressure_alt) - baseline_m
+    record["sensor_alt_agl_m"] = float(pressure_alt) - baseline_m
     return baseline_m
 
 
@@ -331,8 +335,9 @@ def _new_history() -> dict[str, list]:
     return {
         "time": [],
         "sim_alt": [],
-        "sim_pressure_alt_agl_m": [],
+        "sensor_alt_agl_m": [],
         "sim_acc_mps2": [],
+        "sensor_acc_z_mps2": [],
         "sensor_alt": [],
         "fc_alt": [],
         "fc_stage": [],
@@ -385,6 +390,16 @@ def _coerce_float(value: str) -> float:
 
 def _format_optional(value: float) -> str:
     return f"{value:8.1f}" if not math.isnan(value) else "     n/a"
+
+
+def _sensor_accel_z(packet) -> float:
+    accel = getattr(packet, "accel", None)
+    if accel is None or len(accel) < 3:
+        return math.nan
+    try:
+        return float(accel[2])
+    except Exception:
+        return math.nan
 
 
 def _normalize_field_name(name: str) -> str:

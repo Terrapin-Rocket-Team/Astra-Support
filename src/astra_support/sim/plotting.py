@@ -9,18 +9,18 @@ def plot_history(history: dict[str, list], *, source_name: str) -> None:
     if not history["time"]:
         return
 
-    sim_velocity = _derive_series_rate(history["time"], history["sim_alt"])
-    sim_accel = history["sim_acc_mps2"]
-    if not any(_is_number(value) for value in sim_accel):
-        sim_accel = _derive_series_rate(history["time"], sim_velocity)
+    real_velocity = _derive_series_rate(history["time"], history["sim_alt"])
+    real_accel = history["sim_acc_mps2"]
+    if not any(_is_number(value) for value in real_accel):
+        real_accel = _derive_series_rate(history["time"], real_velocity)
 
     fig, (ax_alt, ax_vel, ax_acc, ax_ctrl) = plt.subplots(4, 1, figsize=(12, 11), sharex=True)
-    ax_alt.plot(history["time"], history["sim_alt"], label="Sim altitude", color="tab:blue")
-    if any(_is_number(value) for value in history["sim_pressure_alt_agl_m"]):
+    ax_alt.plot(history["time"], history["sim_alt"], label="Real altitude", color="tab:blue")
+    if any(_is_number(value) for value in history["sensor_alt_agl_m"]):
         ax_alt.plot(
             history["time"],
-            [_nan_to_none(value) for value in history["sim_pressure_alt_agl_m"]],
-            label="Sim pressure alt (AGL)",
+            [_nan_to_none(value) for value in history["sensor_alt_agl_m"]],
+            label="Sensor altitude",
             color="tab:cyan",
             linestyle="--",
         )
@@ -33,15 +33,23 @@ def plot_history(history: dict[str, list], *, source_name: str) -> None:
     ax_alt.set_ylabel("Altitude (m)")
     ax_alt.grid(True, linestyle="--", alpha=0.3)
 
-    if any(_is_number(value) for value in sim_velocity):
-        ax_vel.plot(history["time"], [_nan_to_none(value) for value in sim_velocity], label="Sim velocity", color="tab:green")
+    if any(_is_number(value) for value in real_velocity):
+        ax_vel.plot(history["time"], [_nan_to_none(value) for value in real_velocity], label="Real velocity", color="tab:green")
     if any(_is_number(value) for value in history["fc_vel_z_mps"]):
         ax_vel.plot(history["time"], [_nan_to_none(value) for value in history["fc_vel_z_mps"]], label="FC VZ", color="tab:orange")
     ax_vel.set_ylabel("Velocity (m/s)")
     ax_vel.grid(True, linestyle="--", alpha=0.3)
 
-    if any(_is_number(value) for value in sim_accel):
-        ax_acc.plot(history["time"], [_nan_to_none(value) for value in sim_accel], label="Sim accel", color="tab:purple")
+    if any(_is_number(value) for value in real_accel):
+        ax_acc.plot(history["time"], [_nan_to_none(value) for value in real_accel], label="Real accel", color="tab:purple")
+    if any(_is_number(value) for value in history["sensor_acc_z_mps2"]):
+        ax_acc.plot(
+            history["time"],
+            [_nan_to_none(value) for value in history["sensor_acc_z_mps2"]],
+            label="Sensor accel",
+            color="tab:cyan",
+            linestyle="--",
+        )
     if any(_is_number(value) for value in history["fc_acc_z_mps2"]):
         ax_acc.plot(history["time"], [_nan_to_none(value) for value in history["fc_acc_z_mps2"]], label="FC accel", color="tab:orange")
     ax_acc.set_ylabel("Accel (m/s^2)")

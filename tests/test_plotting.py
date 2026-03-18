@@ -12,8 +12,9 @@ class PlottingTests(unittest.TestCase):
         history = {
             "time": [0.0, 0.5, 1.0],
             "sim_alt": [0.0, 10.0, 25.0],
-            "sim_pressure_alt_agl_m": [0.0, 10.1, 25.2],
+            "sensor_alt_agl_m": [0.0, 10.1, 25.2],
             "sim_acc_mps2": [math.nan, 40.0, 30.0],
+            "sensor_acc_z_mps2": [9.7, 49.2, 20.1],
             "sensor_alt": [0.0, 10.0, 25.0],
             "fc_alt": [math.nan, 9.5, 24.0],
             "fc_stage": ["PAD", "BOOST", "COAST"],
@@ -33,7 +34,10 @@ class PlottingTests(unittest.TestCase):
         patched_show.assert_called_once()
         fig = plotting.plt.gcf()
         altitude_labels = [line.get_label() for line in fig.axes[0].get_lines() if not line.get_label().startswith("_")]
-        self.assertIn("Sim pressure alt (AGL)", altitude_labels)
+        self.assertIn("Sensor altitude", altitude_labels)
+        accel_labels = [line.get_label() for line in fig.axes[2].get_lines() if not line.get_label().startswith("_")]
+        self.assertIn("Real accel", accel_labels)
+        self.assertIn("Sensor accel", accel_labels)
         control_labels = [line.get_label() for line in fig.axes[-1].get_lines() if not line.get_label().startswith("_")]
         self.assertEqual(control_labels, ["Flap cmd", "Flap actual"])
         plotting.plt.close(fig)
