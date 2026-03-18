@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from astra_support.sim import data_sources
 from astra_support.sim import session
 
 
@@ -72,10 +73,12 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(events[:3], ["listen", "start-sitl", "wait"])
 
     def test_record_packet_extracts_velocity_and_acceleration_fields_with_normalized_units(self):
+        expected_alt = 321.0
         packet = SimpleNamespace(
             timestamp=12.5,
             truth_alt=321.0,
             alt=320.5,
+            pressure=data_sources.pressure_from_msl_altitude(expected_alt),
             truth_accel=18.2,
         )
         fields = {
@@ -86,7 +89,7 @@ class SessionTests(unittest.TestCase):
 
         record = session._record_packet(packet, fields, [])
 
-        self.assertEqual(record["sim_alt"], 321.0)
+        self.assertAlmostEqual(record["sim_alt"], expected_alt, places=3)
         self.assertEqual(record["sim_acc_mps2"], 18.2)
         self.assertEqual(record["fc_stage"], "BOOST")
         self.assertEqual(record["fc_vel_z_mps"], 87.4)
