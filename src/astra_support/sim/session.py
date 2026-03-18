@@ -29,6 +29,7 @@ def run_simulation(args, project_root: Path) -> int:
     fc_header_names: list[str] = []
     fc_col_map = None
     history = _new_history()
+    sim_pressure_alt_baseline_m = math.nan
     run_failed = False
 
     try:
@@ -73,6 +74,7 @@ def run_simulation(args, project_root: Path) -> int:
                 custom_sim.on_fc_telemetry(fields)
 
             record = _record_packet(packet, fields, current_values)
+            sim_pressure_alt_baseline_m = _apply_pressure_altitude_baseline(record, sim_pressure_alt_baseline_m)
             for key, value in record.items():
                 history[key].append(value)
 
@@ -257,9 +259,9 @@ def _read_telem_response(link, fc_header_names: list[str] | None = None) -> str:
 
 def _record_packet(packet, fields: dict[str, str], current_values: list[str]) -> dict[str, object]:
     sim_alt = packet.truth_alt if packet.truth_alt is not None else packet.alt
-    sim_pressure_alt_m = data_sources.pressure_to_msl_altitude(packet.pressure)
-    if math.isnan(sim_pressure_alt_m):
-        sim_pressure_alt_m = packet.alt
+    sim_pressure_alt_agl_m = data_sources.pressure_to_msl_altitude(packet.pressure)
+    if math.isnan(sim_pressure_alt_agl_m):
+        sim_pressure_alt_agl_m = packet.alt
     fc_alt = _coerce_float(_pick(fields, ["State - PZ (m)", "State - Alt (m)", "Alt (m)"]))
     fc_stage = _pick(fields, ["State - Flight Stage", "Stage"], "unknown")
     fc_vel_z = _coerce_float(
@@ -299,7 +301,7 @@ def _record_packet(packet, fields: dict[str, str], current_values: list[str]) ->
     return {
         "time": packet.timestamp,
         "sim_alt": sim_alt,
-        "sim_pressure_alt_m": sim_pressure_alt_m,
+        "sim_pressure_alt_agl_m": sim_pressure_alt_agl_m,
         "sim_acc_mps2": packet.truth_accel if packet.truth_accel is not None else math.nan,
         "sensor_alt": packet.alt,
         "fc_alt": fc_alt,
@@ -315,11 +317,21 @@ def _record_packet(packet, fields: dict[str, str], current_values: list[str]) ->
     }
 
 
+def _apply_pressure_altitude_baseline(record: dict[str, object], baseline_m: float) -> float:
+    pressure_alt = record.get("sim_pressure_alt_agl_m")
+    if not isinstance(pressure_alt, (int, float)) or math.isnan(pressure_alt):
+        return baseline_m
+    if math.isnan(baseline_m):
+        baseline_m = float(pressure_alt)
+    record["sim_pressure_alt_agl_m"] = float(pressure_alt) - baseline_m
+    return baseline_m
+
+
 def _new_history() -> dict[str, list]:
     return {
         "time": [],
         "sim_alt": [],
-        "sim_pressure_alt_m": [],
+        "sim_pressure_alt_agl_m": [],
         "sim_acc_mps2": [],
         "sensor_alt": [],
         "fc_alt": [],

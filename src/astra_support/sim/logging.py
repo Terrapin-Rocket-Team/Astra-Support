@@ -13,7 +13,7 @@ def write_sim_log(path: Path, history: dict[str, list], fc_header_names: list[st
 
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        header = ["Sim_Time", "Sim_Alt", "Sim_Pressure_Alt_MSL", "Sim_Vel_Z_mps", "Sim_Accel_Z_mps2"]
+        header = ["Sim_Time", "Sim_Alt", "Sim_Pressure_Alt_AGL", "Sim_Vel_Z_mps", "Sim_Accel_Z_mps2"]
         if fc_header_names:
             header.extend(fc_header_names)
         else:
@@ -23,7 +23,7 @@ def write_sim_log(path: Path, history: dict[str, list], fc_header_names: list[st
             row = [
                 timestamp,
                 history["sim_alt"][index],
-                history["sim_pressure_alt_m"][index],
+                history["sim_pressure_alt_agl_m"][index],
                 _nan_to_empty(sim_velocity[index]) if index < len(sim_velocity) else "",
                 _nan_to_empty(sim_accel[index]) if index < len(sim_accel) else "",
             ]
