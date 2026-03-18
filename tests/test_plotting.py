@@ -30,3 +30,7 @@ class PlottingTests(unittest.TestCase):
             plotting.plot_history(history, source_name="airbrake")
 
         patched_show.assert_called_once()
+        fig = plotting.plt.gcf()
+        control_labels = [line.get_label() for line in fig.axes[-1].get_lines() if not line.get_label().startswith("_")]
+        self.assertEqual(control_labels, ["Flap cmd", "Flap actual"])
+        plotting.plt.close(fig)

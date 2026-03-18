@@ -5,13 +5,16 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 from typing import Optional
 
 CHECK_INTERVAL_SECONDS = 30
+CHANGELOG_ENTRY_LIMIT = 5
+CHANGELOG_DEPTH_STEPS = (32, 128, 512)
 STATE_PATH = Path.home() / ".astra-support" / "update-state.json"
 
 
@@ -22,6 +25,8 @@ class UpdateInfo:
     latest: Optional[str] = None
     install_spec: Optional[str] = None
     source: Optional[str] = None
+    changes: list[str] = field(default_factory=list)
+    additional_changes: int = 0
 
 
 def _is_truthy(value: str | None) -> bool:
@@ -77,6 +82,78 @@ def _mark_checked() -> None:
     _write_state(state)
 
 
+def _run_git_command(args: list[str], *, cwd: Path | None = None, timeout: int = 8) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        timeout=timeout,
+        check=False,
+        cwd=cwd,
+    )
+
+
+def _git_commit_exists(repo_dir: Path, commit: str) -> bool:
+    result = _run_git_command(["cat-file", "-e", f"{commit}^{{commit}}"], cwd=repo_dir)
+    return result.returncode == 0
+
+
+def _git_is_ancestor(repo_dir: Path, older: str, newer: str) -> bool:
+    result = _run_git_command(["merge-base", "--is-ancestor", older, newer], cwd=repo_dir)
+    return result.returncode == 0
+
+
+def _git_log_subjects(repo_dir: Path, revspec: str, *, limit: int) -> list[str]:
+    result = _run_git_command(
+        ["log", "--format=%h %s", f"--max-count={limit}", revspec],
+        cwd=repo_dir,
+    )
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _get_git_change_summary(
+    url: str,
+    requested_revision: str,
+    current_commit: str,
+    latest_commit: str,
+) -> tuple[list[str], int]:
+    try:
+        with tempfile.TemporaryDirectory(prefix="astra-support-update-") as temp_dir:
+            repo_dir = Path(temp_dir)
+            if _run_git_command(["init"], cwd=repo_dir).returncode != 0:
+                return [], 0
+            if _run_git_command(["remote", "add", "origin", url], cwd=repo_dir).returncode != 0:
+                return [], 0
+
+            log_lines: list[str] = []
+            for depth in CHANGELOG_DEPTH_STEPS:
+                fetch_result = _run_git_command(
+                    ["fetch", "--depth", str(depth), "origin", requested_revision],
+                    cwd=repo_dir,
+                    timeout=15,
+                )
+                if fetch_result.returncode != 0:
+                    return [], 0
+                if _git_commit_exists(repo_dir, current_commit) and _git_is_ancestor(repo_dir, current_commit, "FETCH_HEAD"):
+                    log_lines = _git_log_subjects(
+                        repo_dir,
+                        f"{current_commit}..FETCH_HEAD",
+                        limit=CHANGELOG_ENTRY_LIMIT + 1,
+                    )
+                    break
+
+            if not log_lines:
+                log_lines = _git_log_subjects(repo_dir, latest_commit, limit=CHANGELOG_ENTRY_LIMIT + 1)
+
+            additional_changes = max(0, len(log_lines) - CHANGELOG_ENTRY_LIMIT)
+            return log_lines[:CHANGELOG_ENTRY_LIMIT], additional_changes
+    except Exception:
+        return [], 0
+
+
 def _check_git_install(current: str) -> Optional[UpdateInfo]:
     try:
         dist = metadata.distribution("astra-support")
@@ -99,26 +176,22 @@ def _check_git_install(current: str) -> Optional[UpdateInfo]:
         if not current_commit:
             return None
 
-        result = subprocess.run(
-            ["git", "ls-remote", url, requested_revision],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=8,
-            check=False,
-        )
+        result = _run_git_command(["ls-remote", url, requested_revision])
         if result.returncode != 0 or not result.stdout.strip():
             return None
 
         latest_commit = result.stdout.strip().split()[0]
         if latest_commit and latest_commit != current_commit:
             install_spec = f"git+{url}@{requested_revision}"
+            changes, additional_changes = _get_git_change_summary(url, requested_revision, current_commit, latest_commit)
             return UpdateInfo(
                 available=True,
                 current=current,
                 latest=latest_commit[:8],
                 install_spec=install_spec,
                 source="git",
+                changes=changes,
+                additional_changes=additional_changes,
             )
     except Exception:
         return None
@@ -177,6 +250,19 @@ def _get_update_info() -> Optional[UpdateInfo]:
     return UpdateInfo(available=False, current=current)
 
 
+def _build_update_notice(update: UpdateInfo, upgrade_cmd: str) -> list[str]:
+    latest_label = update.latest or "newer"
+    lines = [
+        f"Update available: {update.current} -> {latest_label}",
+        f"  run: {upgrade_cmd}",
+    ]
+    if update.changes:
+        lines.append("  recent changes:")
+        lines.extend(f"    - {change}" for change in update.changes)
+        if update.additional_changes > 0:
+            lines.append(f"    - ... and {update.additional_changes} more")
+    return lines
+
 
 def maybe_prompt_for_update(*, no_update_check: bool = False, force: bool = False) -> bool:
     if no_update_check:
@@ -193,21 +279,11 @@ def maybe_prompt_for_update(*, no_update_check: bool = False, force: bool = Fals
     if not update or not update.available:
         return False
 
-    # Determine the suggested upgrade command.
     if shutil.which("pipx"):
         upgrade_cmd = "pipx upgrade astra-support"
     else:
         upgrade_cmd = "pip install --upgrade astra-support"
 
-    latest_label = update.latest or "newer"
-
-    BS = "\033[1m"
-    Y = "\033[93m"
-    DIM = "\033[2m"
-    NC = "\033[0m"
-
-    print(
-        f"{Y}  ↑  Update available:{NC} {update.current} → {BS}{latest_label}{NC}"
-        f"   {DIM}run: {upgrade_cmd}{NC}"
-    )
+    for line in _build_update_notice(update, upgrade_cmd):
+        print(line)
     return False

@@ -65,8 +65,6 @@ def plot_history(history: dict[str, list], *, source_name: str) -> None:
         ax_ctrl.plot(history["time"], [_nan_to_none(value) for value in history["fc_flap_cmd_deg"]], label="Flap cmd", color="tab:green")
     if any(_is_number(value) for value in history["fc_flap_actual_deg"]):
         ax_ctrl.plot(history["time"], [_nan_to_none(value) for value in history["fc_flap_actual_deg"]], label="Flap actual", color="tab:brown")
-    if any(_is_number(value) for value in history["fc_mach"]):
-        ax_ctrl.plot(history["time"], [_nan_to_none(value) for value in history["fc_mach"]], label="Mach", color="tab:cyan")
     ax_ctrl.set_xlabel("Time (s)")
     ax_ctrl.set_ylabel("Control")
     ax_ctrl.grid(True, linestyle="--", alpha=0.3)
