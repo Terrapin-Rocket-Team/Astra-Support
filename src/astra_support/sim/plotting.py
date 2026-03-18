@@ -16,6 +16,14 @@ def plot_history(history: dict[str, list], *, source_name: str) -> None:
 
     fig, (ax_alt, ax_vel, ax_acc, ax_ctrl) = plt.subplots(4, 1, figsize=(12, 11), sharex=True)
     ax_alt.plot(history["time"], history["sim_alt"], label="Sim altitude", color="tab:blue")
+    if any(_is_number(value) for value in history["sim_pressure_alt_m"]):
+        ax_alt.plot(
+            history["time"],
+            [_nan_to_none(value) for value in history["sim_pressure_alt_m"]],
+            label="Sim pressure alt (MSL)",
+            color="tab:cyan",
+            linestyle="--",
+        )
     if any(_is_number(value) for value in history["fc_alt"]):
         ax_alt.plot(history["time"], [_nan_to_none(value) for value in history["fc_alt"]], label="FC altitude", color="tab:orange")
     if any(_is_number(value) for value in history["fc_est_apogee_m"]):

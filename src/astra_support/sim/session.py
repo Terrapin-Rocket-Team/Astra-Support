@@ -256,6 +256,10 @@ def _read_telem_response(link, fc_header_names: list[str] | None = None) -> str:
 
 
 def _record_packet(packet, fields: dict[str, str], current_values: list[str]) -> dict[str, object]:
+    sim_alt = packet.truth_alt if packet.truth_alt is not None else packet.alt
+    sim_pressure_alt_m = data_sources.pressure_to_msl_altitude(packet.pressure)
+    if math.isnan(sim_pressure_alt_m):
+        sim_pressure_alt_m = packet.alt
     fc_alt = _coerce_float(_pick(fields, ["State - PZ (m)", "State - Alt (m)", "Alt (m)"]))
     fc_stage = _pick(fields, ["State - Flight Stage", "Stage"], "unknown")
     fc_vel_z = _coerce_float(
@@ -294,7 +298,8 @@ def _record_packet(packet, fields: dict[str, str], current_values: list[str]) ->
     fc_mach = _coerce_float(_pick(fields, ["AirbrakeCtrl - Mach", "Mach"]))
     return {
         "time": packet.timestamp,
-        "sim_alt": packet.truth_alt if packet.truth_alt is not None else packet.alt,
+        "sim_alt": sim_alt,
+        "sim_pressure_alt_m": sim_pressure_alt_m,
         "sim_acc_mps2": packet.truth_accel if packet.truth_accel is not None else math.nan,
         "sensor_alt": packet.alt,
         "fc_alt": fc_alt,
@@ -314,6 +319,7 @@ def _new_history() -> dict[str, list]:
     return {
         "time": [],
         "sim_alt": [],
+        "sim_pressure_alt_m": [],
         "sim_acc_mps2": [],
         "sensor_alt": [],
         "fc_alt": [],

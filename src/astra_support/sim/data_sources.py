@@ -4,6 +4,21 @@ import numpy as np
 from dataclasses import dataclass
 from scipy.spatial.transform import Rotation
 
+SEA_LEVEL_PRESSURE_HPA = 1013.25
+MSL_ALTITUDE_SCALE_M = 44330.0
+MSL_ALTITUDE_EXPONENT = 0.1903
+
+
+def pressure_to_msl_altitude(pressure_hpa: float) -> float:
+    if pressure_hpa <= 0:
+        return float("nan")
+    return MSL_ALTITUDE_SCALE_M * (1.0 - (pressure_hpa / SEA_LEVEL_PRESSURE_HPA) ** MSL_ALTITUDE_EXPONENT)
+
+
+def pressure_from_msl_altitude(altitude_m: float) -> float:
+    altitude_ratio = max(0.0, 1.0 - (altitude_m / MSL_ALTITUDE_SCALE_M))
+    return SEA_LEVEL_PRESSURE_HPA * (altitude_ratio ** (1.0 / MSL_ALTITUDE_EXPONENT))
+
 @dataclass
 class PacketData:
     timestamp: float
@@ -91,7 +106,7 @@ class PhysicsSim(DataSource):
         accel_measured = -accel_z - 9.81
 
         return PacketData(self.t, np.array([0., 0., accel_measured]), np.zeros(3), np.zeros(3),
-                          1013.25 - (self.alt * 0.12), 25.0, 45.0, -122.0, self.alt, 1, 8, 0.0,
+                          pressure_from_msl_altitude(self.alt), 25.0, 45.0, -122.0, self.alt, 1, 8, 0.0,
                           truth_alt=self.alt, truth_accel=accel_z)
 
 class CSVSim(DataSource):
@@ -219,6 +234,7 @@ class CSVSim(DataSource):
                 lat_val = get_val('lat', 45.0)
                 lon_val = get_val('lon', -122.0)
                 gps_alt_val = get_val('gps_alt', alt_val)
+                pressure_val = get_val('pres', pressure_from_msl_altitude(alt_val))
                 fix_val = int(get_val('fix', 1.0))
                 sats_val = int(get_val('sats', 8.0))
                 heading_val = get_val('heading', 0.0)
@@ -227,7 +243,7 @@ class CSVSim(DataSource):
                                             np.array([sensor_x, sensor_y, sensor_z]),
                                             np.array([gyro_x, gyro_y, gyro_z]),
                                             np.array([mag_x, mag_y, mag_z]),
-                                            get_val('pres', 1013.25),
+                                            pressure_val,
                                             get_val('temp', 25.0),
                                             lat_val,
                                             lon_val,
@@ -257,6 +273,7 @@ class NetworkStreamSim(DataSource):
                 self.last_packet.timestamp = float(parts[0])
                 self.last_packet.accel = np.array([float(parts[1]), float(parts[2]), float(parts[3])])
                 self.last_packet.alt = float(parts[4])
+                self.last_packet.pressure = pressure_from_msl_altitude(self.last_packet.alt)
         except BlockingIOError: pass
         return self.last_packet
 
@@ -415,10 +432,7 @@ class NoisySim(DataSource):
         packet.gyro += np.random.normal(0, self.gyro_noise, 3)
         packet.mag += np.random.normal(0, self.mag_noise, 3)
 
-        # Add noise to pressure and convert to altitude
-        # Using standard barometric formula: alt = 44330 * (1 - (P/P0)^0.1903)
-        P0 = 1013.25  # Sea level pressure in hPa
         packet.pressure += np.random.normal(0, self.baro_noise)
-        packet.alt = 44330.0 * (1.0 - (packet.pressure / P0) ** 0.1903)
+        packet.alt = pressure_to_msl_altitude(packet.pressure)
 
         return packet
