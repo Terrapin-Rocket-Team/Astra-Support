@@ -433,6 +433,5 @@ class NoisySim(DataSource):
         packet.mag += np.random.normal(0, self.mag_noise, 3)
 
         packet.pressure += np.random.normal(0, self.baro_noise)
-        packet.alt = pressure_to_msl_altitude(packet.pressure)
 
         return packet
