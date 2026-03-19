@@ -35,6 +35,7 @@ class PacketData:
     heading: float
     truth_alt: float = None  # Ground truth altitude (before noise)
     truth_accel: float = None  # Ground truth inertial acceleration (before sensor transform)
+    sensor_alt_agl: float = None  # Pressure-derived/reported altitude AGL when supplied by the sim
 
     def to_hitl_string(self) -> str:
         return (f"HITL/{self.timestamp:.3f},"

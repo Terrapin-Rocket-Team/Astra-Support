@@ -265,9 +265,13 @@ def _read_telem_response(link, fc_header_names: list[str] | None = None) -> str:
 
 def _record_packet(packet, fields: dict[str, str], current_values: list[str]) -> dict[str, object]:
     sim_alt = packet.truth_alt if packet.truth_alt is not None else packet.alt
-    sensor_alt_agl_m = data_sources.pressure_to_msl_altitude(packet.pressure)
-    if math.isnan(sensor_alt_agl_m):
-        sensor_alt_agl_m = packet.alt
+    sensor_alt_agl_value = getattr(packet, "sensor_alt_agl", None)
+    if isinstance(sensor_alt_agl_value, (int, float)) and not math.isnan(sensor_alt_agl_value):
+        sensor_alt_agl_m = float(sensor_alt_agl_value)
+    else:
+        sensor_alt_agl_m = data_sources.pressure_to_msl_altitude(packet.pressure)
+        if math.isnan(sensor_alt_agl_m):
+            sensor_alt_agl_m = packet.alt
     sensor_acc_z_mps2 = _sensor_accel_z(packet)
     fc_alt = _coerce_float(_pick(fields, ["State - PZ (m)", "State - Alt (m)", "Alt (m)"]))
     fc_stage = _pick(fields, ["State - Flight Stage", "Stage"], "unknown")

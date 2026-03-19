@@ -186,3 +186,17 @@ class SessionTests(unittest.TestCase):
         record = session._record_packet(packet, {}, [])
 
         self.assertEqual(record["sensor_acc_z_mps2"], 12.34)
+
+    def test_record_packet_prefers_sensor_altitude_from_packet_when_supplied(self):
+        packet = SimpleNamespace(
+            timestamp=1.0,
+            truth_alt=100.0,
+            alt=1012.0,
+            pressure=data_sources.pressure_from_msl_altitude(95.0),
+            truth_accel=0.0,
+            sensor_alt_agl=123.45,
+        )
+
+        record = session._record_packet(packet, {}, [])
+
+        self.assertAlmostEqual(record["sensor_alt_agl_m"], 123.45, places=6)
