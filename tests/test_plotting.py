@@ -8,7 +8,7 @@ from astra_support.sim import plotting
 
 
 class PlottingTests(unittest.TestCase):
-    def test_plot_history_handles_velocity_and_acceleration_panels(self):
+    def test_plot_history_skips_velocity_and_acceleration_panels(self):
         history = {
             "time": [0.0, 0.5, 1.0],
             "sim_alt": [0.0, 10.0, 25.0],
@@ -33,11 +33,9 @@ class PlottingTests(unittest.TestCase):
 
         patched_show.assert_called_once()
         fig = plotting.plt.gcf()
+        self.assertEqual(len(fig.axes), 2)
         altitude_labels = [line.get_label() for line in fig.axes[0].get_lines() if not line.get_label().startswith("_")]
         self.assertIn("Sensor altitude", altitude_labels)
-        accel_labels = [line.get_label() for line in fig.axes[2].get_lines() if not line.get_label().startswith("_")]
-        self.assertIn("Real accel", accel_labels)
-        self.assertIn("Sensor accel", accel_labels)
         control_labels = [line.get_label() for line in fig.axes[-1].get_lines() if not line.get_label().startswith("_")]
         self.assertEqual(control_labels, ["Flap cmd", "Flap actual"])
         plotting.plt.close(fig)

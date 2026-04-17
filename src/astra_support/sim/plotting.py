@@ -9,12 +9,13 @@ def plot_history(history: dict[str, list], *, source_name: str) -> None:
     if not history["time"]:
         return
 
-    real_velocity = _derive_series_rate(history["time"], history["sim_alt"])
-    real_accel = history["sim_acc_mps2"]
-    if not any(_is_number(value) for value in real_accel):
-        real_accel = _derive_series_rate(history["time"], real_velocity)
+    # Velocity and acceleration panels are temporarily disabled.
+    # real_velocity = _derive_series_rate(history["time"], history["sim_alt"])
+    # real_accel = history["sim_acc_mps2"]
+    # if not any(_is_number(value) for value in real_accel):
+    #     real_accel = _derive_series_rate(history["time"], real_velocity)
 
-    fig, (ax_alt, ax_vel, ax_acc, ax_ctrl) = plt.subplots(4, 1, figsize=(12, 11), sharex=True)
+    fig, (ax_alt, ax_ctrl) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
     ax_alt.plot(history["time"], history["sim_alt"], label="Real altitude", color="tab:blue")
     if any(_is_number(value) for value in history["sensor_alt_agl_m"]):
         ax_alt.plot(
@@ -33,32 +34,32 @@ def plot_history(history: dict[str, list], *, source_name: str) -> None:
     ax_alt.set_ylabel("Altitude (m)")
     ax_alt.grid(True, linestyle="--", alpha=0.3)
 
-    if any(_is_number(value) for value in real_velocity):
-        ax_vel.plot(history["time"], [_nan_to_none(value) for value in real_velocity], label="Real velocity", color="tab:green")
-    if any(_is_number(value) for value in history["fc_vel_z_mps"]):
-        ax_vel.plot(history["time"], [_nan_to_none(value) for value in history["fc_vel_z_mps"]], label="FC VZ", color="tab:orange")
-    ax_vel.set_ylabel("Velocity (m/s)")
-    ax_vel.grid(True, linestyle="--", alpha=0.3)
+    # if any(_is_number(value) for value in real_velocity):
+    #     ax_vel.plot(history["time"], [_nan_to_none(value) for value in real_velocity], label="Real velocity", color="tab:green")
+    # if any(_is_number(value) for value in history["fc_vel_z_mps"]):
+    #     ax_vel.plot(history["time"], [_nan_to_none(value) for value in history["fc_vel_z_mps"]], label="FC VZ", color="tab:orange")
+    # ax_vel.set_ylabel("Velocity (m/s)")
+    # ax_vel.grid(True, linestyle="--", alpha=0.3)
 
-    if any(_is_number(value) for value in real_accel):
-        ax_acc.plot(history["time"], [_nan_to_none(value) for value in real_accel], label="Real accel", color="tab:purple")
-    if any(_is_number(value) for value in history["sensor_acc_z_mps2"]):
-        ax_acc.plot(
-            history["time"],
-            [_nan_to_none(value) for value in history["sensor_acc_z_mps2"]],
-            label="Sensor accel",
-            color="tab:cyan",
-            linestyle="--",
-        )
-    if any(_is_number(value) for value in history["fc_acc_z_mps2"]):
-        ax_acc.plot(history["time"], [_nan_to_none(value) for value in history["fc_acc_z_mps2"]], label="FC accel", color="tab:orange")
-    ax_acc.set_ylabel("Accel (m/s^2)")
-    ax_acc.grid(True, linestyle="--", alpha=0.3)
+    # if any(_is_number(value) for value in real_accel):
+    #     ax_acc.plot(history["time"], [_nan_to_none(value) for value in real_accel], label="Real accel", color="tab:purple")
+    # if any(_is_number(value) for value in history["sensor_acc_z_mps2"]):
+    #     ax_acc.plot(
+    #         history["time"],
+    #         [_nan_to_none(value) for value in history["sensor_acc_z_mps2"]],
+    #         label="Sensor accel",
+    #         color="tab:cyan",
+    #         linestyle="--",
+    #     )
+    # if any(_is_number(value) for value in history["fc_acc_z_mps2"]):
+    #     ax_acc.plot(history["time"], [_nan_to_none(value) for value in history["fc_acc_z_mps2"]], label="FC accel", color="tab:orange")
+    # ax_acc.set_ylabel("Accel (m/s^2)")
+    # ax_acc.grid(True, linestyle="--", alpha=0.3)
 
     stage_changes = _stage_changes(history)
     for index, (timestamp, stage_value) in enumerate(stage_changes):
         label = "Stage change" if index == 0 else None
-        for axis in (ax_alt, ax_vel, ax_acc, ax_ctrl):
+        for axis in (ax_alt, ax_ctrl):
             axis.axvline(timestamp, color="tab:gray", linestyle="--", linewidth=1.0, alpha=0.45, label=label if axis is ax_alt else None)
         ax_alt.annotate(
             str(stage_value),
@@ -74,8 +75,8 @@ def plot_history(history: dict[str, list], *, source_name: str) -> None:
         )
 
     _show_legend_if_needed(ax_alt)
-    _show_legend_if_needed(ax_vel)
-    _show_legend_if_needed(ax_acc)
+    # _show_legend_if_needed(ax_vel)
+    # _show_legend_if_needed(ax_acc)
 
     if any(_is_number(value) for value in history["fc_flap_cmd_deg"]):
         ax_ctrl.plot(history["time"], [_nan_to_none(value) for value in history["fc_flap_cmd_deg"]], label="Flap cmd", color="tab:green")
