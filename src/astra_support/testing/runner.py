@@ -15,6 +15,9 @@ from .report import ProgressReporter, print_result, print_stage, print_summary
 
 
 MAX_RETRIES = 3
+# PlatformIO C++ builds are memory-heavy. High-core WSL and workstation hosts
+# can otherwise start enough compilers concurrently to exhaust system memory.
+MAX_PARALLEL_WORKERS = 4
 
 
 @dataclass
@@ -143,7 +146,10 @@ def _run_pool(items, worker, *, progress: ProgressReporter, stage_name: str):
     if not items:
         return []
     progress.start(stage_name, len(items))
-    max_workers = max(1, min(len(items), (os.cpu_count() or 1) - 1))
+    max_workers = max(
+        1,
+        min(len(items), (os.cpu_count() or 1) - 1, MAX_PARALLEL_WORKERS),
+    )
     try:
         return run_parallel_with_retries(
             items,
