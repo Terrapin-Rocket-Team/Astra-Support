@@ -41,8 +41,15 @@ public:
         return 0;
     }
 
-    // Override update() to prevent recalculation when altitude is set directly
-    int update(double currentTime = -1) override
+    // Support both Astra barometer APIs while branches are being consolidated.
+    // Each overload overrides the matching virtual method when built against
+    // that Astra generation.
+    int update()
+    {
+        return update(-1);
+    }
+
+    int update(double currentTime)
     {
         (void)currentTime;
         if (read() != 0)
