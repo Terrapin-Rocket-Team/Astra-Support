@@ -10,8 +10,31 @@ Single-repo support platform for Astra-based projects.
 
 ## Install CLI
 
+Prerequisites:
+
+- Git
+- Python 3.10 or newer
+- `pipx`
+- `g++` for native builds and tests
+
+On Ubuntu 24.04/WSL, install the prerequisites with:
+
+```bash
+sudo apt update
+sudo apt install pipx g++
+pipx ensurepath
+```
+
+Open a new terminal after `pipx ensurepath`, then install the CLI:
+
 ```bash
 pipx install "git+https://github.com/Terrapin-Rocket-Team/Astra-Support.git@main"
+```
+
+Verify that the executable is available:
+
+```bash
+astra-support --version
 ```
 
 This install now pulls all required Python dependencies (including PlatformIO,
@@ -116,9 +139,29 @@ prompt to install them before continuing.
 
 ## Development Checks
 
-Run the Python regression suite from the repository root:
+Create an isolated development environment and install this repository with its
+dependencies:
 
 ```bash
+python3 -m venv .venv
+```
+
+Activate it on Linux/macOS:
+
+```bash
+source .venv/bin/activate
+```
+
+Or activate it in Windows PowerShell:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+Then run the regression suite:
+
+```bash
+python -m pip install -e .
 python -m unittest discover -v
 ```
 
