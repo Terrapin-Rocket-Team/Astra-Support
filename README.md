@@ -108,6 +108,8 @@ prompt to install them before continuing.
 ## Repo Layout
 
 - `native-support/` contains the C++ PlatformIO support library
+  shared by Astra's native tests. Its sensor mocks follow Astra's
+  time-aware `update(double currentTime = -1)` interface.
 - `src/astra_support/` contains the standalone Python CLI
 - `datasets/` contains sim and flight assets that are bundled into CLI installations
 

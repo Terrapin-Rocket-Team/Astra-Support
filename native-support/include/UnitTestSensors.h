@@ -42,8 +42,9 @@ public:
     }
 
     // Override update() to prevent recalculation when altitude is set directly
-    int update() override
+    int update(double currentTime = -1) override
     {
+        (void)currentTime;
         if (read() != 0)
             return -1;
         // Only calculate altitude from pressure if it wasn't set directly
