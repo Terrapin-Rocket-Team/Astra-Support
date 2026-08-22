@@ -2,6 +2,9 @@
 
 Single-repo support platform for Astra-based projects.
 
+Use this tool to prepare and validate a development checkout. It does not
+replace the library documentation or prove that flight hardware works.
+
 ## What this repo provides
 
 1. `astra-support` Python CLI for diagnostics, project sync, testing, and simulation.
@@ -55,6 +58,18 @@ ASTRA_SUPPORT_DISABLE_INSTALL_ASSIST=1
 ```
 
 ## Core Commands
+
+For an existing checkout, start with:
+
+```bash
+cd path/to/project
+astra-support doctor --project .
+astra-support test --project . --clean --no-progress
+```
+
+`doctor` checks the local tooling and project configuration. `test` runs the
+project's managed PlatformIO build/test matrix. Neither command uploads
+firmware or performs hardware qualification.
 
 ```bash
 astra-support doctor --project .
@@ -182,3 +197,5 @@ https://github.com/Terrapin-Rocket-Team/Astra-Support.git#main
 - `docs/support-contract-v1.md` defines the cross-repo convention.
 - `docs/command-contract-v1.md` defines intended CLI usage and contributor expectations.
 - `datasets/astra-rocket/manifest.yaml` tracks migrated datasets.
+- Astra owns reusable library documentation; Astra-Rocket owns rocket behavior;
+  SRAD-Avionics owns board-specific integration and handoff instructions.
