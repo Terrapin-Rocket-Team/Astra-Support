@@ -1,6 +1,6 @@
 {
   "name": "AstraSupportNativeSupport",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Astra-specific native mocks, shims, and test support for PlatformIO projects.",
   "keywords": "Astra, native, mocks, PlatformIO, support",
   "repository": {
@@ -25,11 +25,16 @@
   },
   "export": {
     "exclude": [
+      ".githooks",
       ".github",
+      "build",
       "datasets",
       "docs",
-      "src/astra_support",
+      "scripts",
+      "sim_log_*.csv",
+      "src",
       "tests",
+      "*.egg-info",
       "pyproject.toml"
     ]
   }

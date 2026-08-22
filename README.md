@@ -6,7 +6,7 @@ Single-repo support platform for Astra-based projects.
 
 1. `astra-support` Python CLI for diagnostics, project sync, testing, and simulation.
 2. `native-support/` PlatformIO-native mocks, shims, and Astra-specific test helpers.
-3. `datasets/` flight and simulation assets kept in-repo.
+3. `datasets/` flight and simulation assets included with CLI installations.
 
 ## Install CLI
 
@@ -109,7 +109,19 @@ prompt to install them before continuing.
 
 - `native-support/` contains the C++ PlatformIO support library
 - `src/astra_support/` contains the standalone Python CLI
-- `datasets/` contains bundled sim and flight assets
+- `datasets/` contains sim and flight assets that are bundled into CLI installations
+
+## Development Checks
+
+Run the Python regression suite from the repository root:
+
+```bash
+python -m unittest discover -v
+```
+
+The repository CI also installs the built package, exercises the CLI, and
+verifies that `sync` can generate every supported environment and its packaged
+STM32 assets.
 
 ## Use Native Support as a PlatformIO dependency
 

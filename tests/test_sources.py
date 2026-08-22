@@ -3,10 +3,12 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
 from astra_support.sim import data_sources
+from astra_support.sim import sources
 from astra_support.sim.sources import list_available_sources, resolve_csv_source
 
 
@@ -22,6 +24,20 @@ class SourceTests(unittest.TestCase):
             self.assertIn("demo", list_available_sources(root))
             resolved = resolve_csv_source("demo", root)
             self.assertEqual(resolved, csv_path.resolve())
+
+    def test_lists_dataset_from_installed_package_location(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            project_root = root / "project"
+            installed_root = root / "installed-datasets"
+            dataset_dir = installed_root / "astra-rocket" / "raw"
+            project_root.mkdir()
+            dataset_dir.mkdir(parents=True)
+            (dataset_dir / "bundled.csv").write_text("time,altitude\n0,0\n", encoding="utf-8")
+
+            with mock.patch.object(sources, "installed_dataset_root", return_value=installed_root):
+                self.assertIn("bundled", list_available_sources(project_root))
+                self.assertEqual(resolve_csv_source("bundled", project_root), (dataset_dir / "bundled.csv").resolve())
 
     def test_csv_sim_derives_pressure_from_altitude_when_pressure_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:

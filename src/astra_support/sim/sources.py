@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import sys
 from pathlib import Path
 
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
+
+
+def installed_dataset_root() -> Path:
+    """Return the dataset location used by wheel and pipx installations."""
+    return Path(sys.prefix) / "share" / "astra-support" / "datasets"
 
 
 def source_kind(source_text: str) -> str:
@@ -19,7 +25,7 @@ def source_kind(source_text: str) -> str:
 
 
 def list_available_sources(project_root: Path, *, extra_roots: list[str] | None = None) -> list[str]:
-    roots = _candidate_roots(project_root, extra_roots)
+    roots = candidate_dataset_roots(project_root, extra_roots)
     sources: set[str] = {"physics", "net"}
     for root in roots:
         if not root.exists():
@@ -36,7 +42,7 @@ def resolve_csv_source(source_text: str, project_root: Path, *, extra_roots: lis
             return candidate.resolve()
 
     matches: list[Path] = []
-    for root in _candidate_roots(project_root, extra_roots):
+    for root in candidate_dataset_roots(project_root, extra_roots):
         if not root.exists():
             continue
         for csv_path in root.rglob("*.csv"):
@@ -101,15 +107,16 @@ def invoke_hook(func, available_kwargs: dict[str, object], positional_fallback: 
     return func(*positional_fallback[:positional_count])
 
 
-def _candidate_roots(project_root: Path, extra_roots: list[str] | None) -> list[Path]:
+def candidate_dataset_roots(project_root: Path, extra_roots: list[str] | None = None) -> list[Path]:
     roots = [
         repo_root() / "datasets",
+        installed_dataset_root(),
         project_root / "datasets",
         project_root / "flight-data",
     ]
     for root in extra_roots or []:
         roots.append((project_root / root).resolve() if not Path(root).is_absolute() else Path(root))
-    return roots
+    return list(dict.fromkeys(path.resolve() for path in roots))
 
 
 def _direct_path_candidates(requested: Path, project_root: Path) -> list[Path]:

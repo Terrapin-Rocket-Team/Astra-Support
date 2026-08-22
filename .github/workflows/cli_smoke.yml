@@ -1,4 +1,4 @@
-name: CLI Smoke Test
+name: Python Tests and CLI Smoke
 
 on:
   push:
@@ -14,5 +14,38 @@ jobs:
           python-version: '3.11'
       - name: Install package
         run: python -m pip install .
+      - name: Run unit tests
+        run: python -m unittest discover -v
       - name: Verify CLI
-        run: astra-support --help
+        run: astra-support --no-update-check --help
+      - name: Verify packaged project assets
+        shell: bash
+        run: |
+          project_dir="$(mktemp -d)"
+          astra-support --no-update-check sync \
+            --project "$project_dir" \
+            --env native \
+            --env teensy41 \
+            --env esp32s3 \
+            --env stm32h723vehx \
+            --write-workflow
+          test -f "$project_dir/.astra-support.yml"
+          test -f "$project_dir/.github/workflows/run_astra_support.yml"
+          test -f "$project_dir/custom_variants/stm32h723vehx/variant_STM32H723VEHX.cpp"
+          test -f "$project_dir/ldscripts/ldscript.ld"
+          astra-support --no-update-check sim list --project "$project_dir" | grep -F -- "- NyxORK"
+          astra-support --no-update-check doctor --project "$project_dir"
+      - name: Verify native-support package boundary
+        shell: bash
+        run: |
+          archive_dir="$(mktemp -d)"
+          archive="$archive_dir/astra-support-native.tar.gz"
+          pio pkg pack . --output "$archive"
+          archive_files="$(tar -tf "$archive")"
+          grep -Fqx "native-support/include/Arduino.h" <<< "$archive_files"
+          grep -Fqx "native-support/src/Arduino.cpp" <<< "$archive_files"
+          if grep -Eq '^(build/|datasets/|scripts/|src/|tests/|sim_log_)' <<< "$archive_files"; then
+            echo "Native-support archive contains non-library content"
+            printf '%s\n' "$archive_files"
+            exit 1
+          fi

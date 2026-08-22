@@ -5,6 +5,7 @@ from pathlib import Path
 from ..config.support_file import load_support_config
 from ..platformio.config import env_names
 from ..prereqs import check_toolchain
+from ..sim.sources import candidate_dataset_roots
 
 
 def run(args) -> int:
@@ -30,12 +31,12 @@ def run(args) -> int:
         discovered_envs = env_names(platformio_path)
         notes.append(f"platformio envs: {', '.join(discovered_envs) if discovered_envs else 'none'}")
 
-    dataset_roots = [project_root / "datasets", Path(__file__).resolve().parents[3] / "datasets"]
+    dataset_roots = candidate_dataset_roots(project_root, config.dataset_paths)
     available_dataset_roots = list(dict.fromkeys(str(path) for path in dataset_roots if path.exists()))
     if available_dataset_roots:
         notes.append(f"datasets: {', '.join(available_dataset_roots)}")
     else:
-        issues.append("No datasets directory found in project or support repo.")
+        issues.append("No datasets directory found in the project or Astra Support installation.")
 
     custom_sim = project_root / "astra_support_sim.py"
     notes.append(f"custom sim hooks: {'present' if custom_sim.exists() else 'absent'}")
