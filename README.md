@@ -5,6 +5,10 @@ Single-repo support platform for Astra-based projects.
 Use this tool to prepare and validate a development checkout. It does not
 replace the library documentation or prove that flight hardware works.
 
+For the complete clean-machine sequence through Astra, Astra-Rocket,
+Avionics/Airbrake, SITL, and HITL, start with the
+[flight-software workflow](https://github.com/Terrapin-Rocket-Team/SRAD-Avionics/blob/main/docs/software-stack.md).
+
 ## What this repo provides
 
 1. `astra-support` Python CLI for diagnostics, project sync, testing, and simulation.
@@ -41,7 +45,7 @@ astra-support --version
 ```
 
 This install now pulls all required Python dependencies (including PlatformIO,
-NumPy/SciPy, pyserial, and matplotlib), so `pipx inject ...` is no longer
+NumPy/SciPy, Ambiance, pyserial, and matplotlib), so `pipx inject ...` is no longer
 needed.
 
 You still need `g++` on `PATH` for native build/test flows. `astra-support test`
