@@ -10,6 +10,10 @@ def is_retryable_system_error(log_text: str) -> bool:
     lower = log_text.lower()
     if "homedirpermissionserror" in lower or "not owned by the current user" in lower:
         return False
+    if ".sconsign" in lower and (
+        "filenotfounderror" in lower or "no such file or directory" in lower
+    ):
+        return True
     return any(
         marker in lower
         for marker in (

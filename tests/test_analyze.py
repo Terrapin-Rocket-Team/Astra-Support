@@ -21,3 +21,10 @@ class AnalyzeTests(unittest.TestCase):
             "platformio.exception.HomeDirPermissionsError: directory is not owned by the current user"
         )
         self.assertFalse(is_retryable_system_error(log))
+
+    def test_parallel_sconsign_rename_race_is_retryable(self):
+        log = (
+            "FileNotFoundError: [Errno 2] No such file or directory: "
+            "'.pio/cache/.sconsign312.tmp' -> '.pio/cache/.sconsign312.dblite'"
+        )
+        self.assertTrue(is_retryable_system_error(log))
