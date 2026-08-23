@@ -47,9 +47,11 @@ Expected responsibilities:
   - `g++` availability for native/unix flows
 - in interactive terminals, may offer automatic installation attempts for
   missing prerequisites using available package managers
-- install/update platform dependencies
-- build envs
-- run tests
+- prepare platform and library dependencies without updating them unexpectedly
+- serialize dependency mutations to avoid PlatformIO package/file-lock races
+- build envs and run independent test suites in parallel
+- allow the parallel worker count to be tuned with `--jobs`
+- reserve dependency updates for the explicit `--update-deps` flag
 - return non-zero exit code on failure
 
 ### `doctor`
@@ -76,6 +78,8 @@ Expected responsibilities:
   missing prerequisites when `--build` is used
 - optionally load project-local custom source hooks from
   `<project>/astra_support_sim.py`
+- auto-build the default native SITL executable when it is missing; `--build`
+  remains the explicit refresh option
 - support optional custom source feedback hooks (`on_fc_telemetry`) so project
   simulators can react to FC telemetry in lock-step
 
@@ -106,6 +110,8 @@ Expected responsibilities:
 
 - Long flag names must stay clear and descriptive.
 - One-character shortcuts are preferred for high-frequency workflows.
+- `test --clean` clears build artifacts; it does not update dependencies.
+- `test --jobs N` and `ASTRA_SUPPORT_JOBS=N` control parallel build/test work.
 - `-h/--help` on wrapper commands shows wrapper help.
 - Use `-- --help` to see forwarded simulation help:
   - `astra-support sitl -- --help`

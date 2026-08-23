@@ -64,7 +64,7 @@ For an existing checkout, start with:
 ```bash
 cd path/to/project
 astra-support doctor --project .
-astra-support test --project . --clean --no-progress
+astra-support test --project . --no-progress
 ```
 
 `doctor` checks the local tooling and project configuration. `test` runs the
@@ -96,6 +96,28 @@ Managed env snippets live in:
 astra-support test --project .
 ```
 
+The runner prepares PlatformIO dependencies serially, then builds environments
+and test suites in parallel. Dependency preparation is cached until
+`platformio.ini` or the selected environment set changes. Four workers is the
+safe default; increase it on a high-memory machine with:
+
+```bash
+astra-support test --project . --jobs 8
+```
+
+Set `ASTRA_SUPPORT_JOBS` to choose a persistent local default. Use `--clean`
+only when a real rebuild is needed; it clears both normal and parallel test
+artifacts but does not silently update dependencies. Request updates explicitly:
+
+```bash
+astra-support test --project . --clean
+astra-support test --project . --update-deps
+```
+
+`--no-install` skips dependency preparation when you know the checkout is
+already ready. Transient PlatformIO system/file-lock errors are retried and the
+reported retry includes the captured reason.
+
 ## Run Simulation Harness (consumer repo)
 
 ```bash
@@ -105,6 +127,10 @@ astra-support sim list --project ../Astra
 ```bash
 astra-support sim run --project ../Astra --mode sitl --source physics
 ```
+
+SITL reuses the existing native executable. If it is missing, Astra-Support
+builds the `native` environment automatically. Pass `--build` when source or
+configuration changes require an explicit incremental rebuild.
 
 Set an Airbrake preflight target apogee before flight packets begin:
 

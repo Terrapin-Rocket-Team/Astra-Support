@@ -17,6 +17,8 @@ def main(argv=None):
         parser.add_argument("--no-builds", "-B", action="store_true")
         parser.add_argument("--no-tests", "-T", action="store_true")
         parser.add_argument("--clean", "-c", action="store_true")
+        parser.add_argument("--update-deps", action="store_true")
+        parser.add_argument("--jobs", "-j", type=int)
         parser.add_argument("--env", action="append")
         args = parser.parse_args(argv)
         return run_tests(
@@ -27,6 +29,8 @@ def main(argv=None):
                 no_builds=args.no_builds,
                 no_tests=args.no_tests,
                 clean=args.clean,
+                update_deps=args.update_deps,
+                jobs=args.jobs,
                 envs=args.env,
             )
         )

@@ -269,7 +269,7 @@ class NetworkStreamSim(DataSource):
     def get_next_packet(self) -> PacketData:
         try:
             data, _ = self.sock.recvfrom(4096)
-            parts = data.decode().split(',')
+            parts = data.decode("utf-8", errors="replace").split(',')
             if len(parts) >= 5:
                 self.last_packet.timestamp = float(parts[0])
                 self.last_packet.accel = np.array([float(parts[1]), float(parts[2]), float(parts[3])])

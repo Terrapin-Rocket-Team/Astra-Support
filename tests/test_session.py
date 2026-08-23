@@ -12,6 +12,37 @@ from astra_support.sim import session
 
 
 class SessionTests(unittest.TestCase):
+    def test_missing_default_sitl_executable_triggers_native_build(self):
+        args = SimpleNamespace(mode="sitl", no_auto_start=False, sitl_exe=None, build=False)
+        toolchain = SimpleNamespace(errors=[], platformio_cmd=["pio"])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            with (
+                mock.patch.object(session, "check_toolchain", return_value=toolchain),
+                mock.patch.object(session.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as run,
+            ):
+                session._build_native_if_requested(args, project_root)
+
+        run.assert_called_once_with(
+            ["pio", "run", "-e", "native"],
+            cwd=project_root,
+            check=False,
+        )
+
+    def test_existing_default_sitl_executable_reuses_build(self):
+        args = SimpleNamespace(mode="sitl", no_auto_start=False, sitl_exe=None, build=False)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            executable = session.default_sitl_executable(project_root)
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            with mock.patch.object(session.subprocess, "run") as run:
+                session._build_native_if_requested(args, project_root)
+
+        run.assert_not_called()
+
     def test_run_simulation_wraps_custom_source_with_noise(self):
         class FinishedSim:
             def is_finished(self):

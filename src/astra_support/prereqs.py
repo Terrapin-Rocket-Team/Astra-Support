@@ -80,6 +80,7 @@ def resolve_platformio_command() -> list[str] | None:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            errors="replace",
             timeout=8,
             check=False,
         )

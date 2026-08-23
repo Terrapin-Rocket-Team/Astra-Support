@@ -6,6 +6,24 @@ STATUS_COMPILE_ERR = "COMPILE_ERR"
 STATUS_SYSTEM_ERR = "SYSTEM_ERR"
 
 
+def is_retryable_system_error(log_text: str) -> bool:
+    lower = log_text.lower()
+    if "homedirpermissionserror" in lower or "not owned by the current user" in lower:
+        return False
+    return any(
+        marker in lower
+        for marker in (
+            "being used by another process",
+            "sharing violation",
+            "device or resource busy",
+            "resource temporarily unavailable",
+            "cannot open output file",
+            "winerror 32",
+            "winerror 33",
+        )
+    )
+
+
 def analyze_output(log_text: str, return_code: int) -> tuple[str, str]:
     lines = log_text.splitlines()
     cleaned_lines: list[str] = []
@@ -26,7 +44,18 @@ def analyze_output(log_text: str, return_code: int) -> tuple[str, str]:
         elif "Error:" in line or "ERROR:" in line:
             cleaned_lines.append(line_strip)
             found_pio_error = True
-        elif "Permission denied" in line or "cannot open output file" in line or "Device or resource busy" in line:
+        elif any(
+            marker in line
+            for marker in (
+                "Permission denied",
+                "cannot open output file",
+                "Device or resource busy",
+                "being used by another process",
+                "sharing violation",
+                "WinError 32",
+                "WinError 33",
+            )
+        ):
             cleaned_lines.append(line_strip)
             found_system_lock = True
 

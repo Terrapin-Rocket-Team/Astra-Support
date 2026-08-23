@@ -118,12 +118,26 @@ def run_simulation(args, project_root: Path) -> int:
 
 
 def _build_native_if_requested(args, project_root: Path) -> None:
-    if not args.build:
+    default_executable_missing = (
+        args.mode == "sitl"
+        and not args.no_auto_start
+        and not args.sitl_exe
+        and not default_sitl_executable(project_root).is_file()
+    )
+    if not args.build and not default_executable_missing:
         return
+    if default_executable_missing and not args.build:
+        print(paint("Native SITL executable not found; building it now.", Ansi.BLUE))
     toolchain = check_toolchain(require_platformio=True, require_cpp=True, offer_install=True)
     if toolchain.errors:
         raise RuntimeError("\n".join(toolchain.errors))
-    subprocess.run([*(toolchain.platformio_cmd or ["pio"]), "run", "-e", "native"], cwd=project_root, check=True)
+    result = subprocess.run(
+        [*(toolchain.platformio_cmd or ["pio"]), "run", "-e", "native"],
+        cwd=project_root,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Native SITL build failed with exit code {result.returncode}")
 
 
 def _create_custom_sim(args, project_root: Path, custom_create_fn):

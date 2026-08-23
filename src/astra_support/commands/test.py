@@ -17,6 +17,8 @@ def run(args) -> int:
         no_builds=args.no_builds or "--no-builds" in default_flags or "-B" in default_flags,
         no_tests=args.no_tests or "--no-tests" in default_flags or "-T" in default_flags,
         clean=args.clean or "--clean" in default_flags or "-c" in default_flags,
+        update_deps=args.update_deps or "--update-deps" in default_flags,
+        jobs=args.jobs,
         envs=args.env,
         default_args=config.test_args,
     )

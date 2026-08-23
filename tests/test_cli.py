@@ -47,7 +47,7 @@ class CliTests(unittest.TestCase):
             dataset_root=None,
             no_plot=True,
         )
-        with mock.patch.object(cli.sim_cmd, "run", return_value=0) as patched:
+        with mock.patch.object(cli, "_run_sim", return_value=0) as patched:
             cli._compat_sitl(args)
         self.assertFalse(hasattr(args, "mode"))
         forwarded = patched.call_args.args[0]
@@ -77,7 +77,7 @@ class CliTests(unittest.TestCase):
             dataset_root=None,
             no_plot=True,
         )
-        with mock.patch.object(cli.sim_cmd, "run", return_value=0) as patched:
+        with mock.patch.object(cli, "_run_sim", return_value=0) as patched:
             cli._compat_hitl(args)
         self.assertFalse(hasattr(args, "mode"))
         forwarded = patched.call_args.args[0]
@@ -86,10 +86,32 @@ class CliTests(unittest.TestCase):
     def test_main_handles_keyboard_interrupt_cleanly(self):
         with (
             mock.patch.object(cli, "maybe_prompt_for_update", return_value=False),
-            mock.patch.object(cli.doctor_cmd, "run", side_effect=KeyboardInterrupt),
+            mock.patch.object(cli, "_run_doctor", side_effect=KeyboardInterrupt),
             mock.patch("builtins.print") as patched_print,
         ):
             exit_code = cli.main(["doctor", "--project", "."])
 
         self.assertEqual(exit_code, 130)
         self.assertIn("Interrupted by user.", patched_print.call_args.args[0])
+
+    def test_main_formats_expected_runtime_errors(self):
+        with (
+            mock.patch.object(cli, "maybe_prompt_for_update", return_value=False),
+            mock.patch.object(cli, "_run_doctor", side_effect=RuntimeError("broken tool")),
+            mock.patch("builtins.print") as patched_print,
+        ):
+            exit_code = cli.main(["doctor", "--project", "."])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("Error: broken tool", patched_print.call_args.args[0])
+
+    def test_test_command_parses_worker_and_update_options(self):
+        parser = cli.build_parser()
+        args = parser.parse_args(["test", "--jobs", "8", "--update-deps"])
+        self.assertEqual(args.jobs, 8)
+        self.assertTrue(args.update_deps)
+
+    def test_test_command_rejects_nonpositive_workers(self):
+        parser = cli.build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["test", "--jobs", "0"])

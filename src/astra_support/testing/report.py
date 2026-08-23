@@ -4,7 +4,7 @@ import sys
 import threading
 import time
 
-from ..console import Ansi, paint
+from ..console import Ansi, paint, safe_print
 from .analyze import STATUS_COMPILE_ERR, STATUS_PASS, STATUS_SYSTEM_ERR, STATUS_TEST_FAIL
 
 
@@ -49,11 +49,11 @@ class ProgressReporter:
 
     def write(self, message: str) -> None:
         if not self.enabled:
-            print(message)
+            safe_print(message)
             return
         with self._lock:
             self._clear_locked()
-            print(message)
+            safe_print(message)
             self._render_locked()
 
     def stop(self) -> None:
@@ -102,11 +102,11 @@ class ProgressReporter:
 
 
 def print_stage(name: str) -> None:
-    print(f"\n{paint(f'[{name}]', Ansi.BOLD)}")
+    safe_print(f"\n{paint(f'[{name}]', Ansi.BOLD)}")
 
 
 def print_retry(item: str, attempt: int) -> None:
-    print(f"{paint('retry', Ansi.YELLOW)} {attempt}: {item}")
+    safe_print(f"{paint('retry', Ansi.YELLOW)} {attempt}: {item}")
 
 
 def print_result(name: str, status: str, duration: float, *, extra: str = "", log: str = "") -> None:
@@ -114,22 +114,22 @@ def print_result(name: str, status: str, duration: float, *, extra: str = "", lo
     line = f"{paint(icon, color)} {name}: {paint(status.lower(), color)} {paint(f'({duration:.1f}s)', Ansi.DIM)}"
     if extra:
         line = f"{line} {extra}"
-    print(line)
+    safe_print(line)
     if log:
-        print(paint(log, Ansi.DIM))
+        safe_print(paint(log, Ansi.DIM))
 
 
-def print_summary(clean_results, install_results, build_results, test_results) -> None:
-    print(f"\n{paint('[summary]', Ansi.BOLD)}")
+def print_summary(clean_results, dependency_results, build_results, test_results) -> None:
+    safe_print(f"\n{paint('[summary]', Ansi.BOLD)}")
     _print_group("clean", clean_results)
-    _print_group("platforms", install_results)
+    _print_group("dependencies", dependency_results)
     _print_group("builds", build_results)
     _print_group("tests", list(test_results))
 
 
 def _print_group(name: str, results) -> None:
     if not results:
-        print(f"{name}: {paint('skipped', Ansi.DIM)}")
+        safe_print(f"{name}: {paint('skipped', Ansi.DIM)}")
         return
     counts = {
         STATUS_PASS: 0,
@@ -139,7 +139,7 @@ def _print_group(name: str, results) -> None:
     }
     for result in results:
         counts[result.status] = counts.get(result.status, 0) + 1
-    print(
+    safe_print(
         f"{name}: "
         f"{paint(f'pass={counts[STATUS_PASS]}', Ansi.GREEN)} "
         f"{paint(f'fail={counts[STATUS_TEST_FAIL]}', Ansi.RED)} "
@@ -150,9 +150,9 @@ def _print_group(name: str, results) -> None:
 
 def _status_style(status: str) -> tuple[str, str]:
     if status == STATUS_PASS:
-        return "✔", Ansi.GREEN
+        return "[ok]", Ansi.GREEN
     if status == STATUS_TEST_FAIL:
-        return "✘", Ansi.RED
+        return "[x]", Ansi.RED
     if status == STATUS_COMPILE_ERR:
-        return "✘", Ansi.YELLOW
-    return "✘", Ansi.MAGENTA
+        return "[x]", Ansi.YELLOW
+    return "[x]", Ansi.MAGENTA

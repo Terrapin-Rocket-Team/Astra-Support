@@ -1,15 +1,44 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 from types import SimpleNamespace
 
 from . import __version__
-from .commands import doctor as doctor_cmd
-from .commands import sim as sim_cmd
-from .commands import sync as sync_cmd
-from .commands import test as test_cmd
-from .console import Ansi, configure_console_output, paint
+from .console import Ansi, configure_console_output, paint, safe_print
 from .self_update import maybe_prompt_for_update
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
+
+
+def _run_doctor(args) -> int:
+    from .commands import doctor
+    return doctor.run(args)
+
+
+def _run_sync(args) -> int:
+    from .commands import sync
+    return sync.run(args)
+
+
+def _run_test(args) -> int:
+    from .commands import test
+    return test.run(args)
+
+
+def _run_sim(args) -> int:
+    from .commands import sim
+    return sim.run(args)
+
+
+def _list_sim_sources(args) -> int:
+    from .commands import sim
+    return sim.list_sources(args)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -27,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_doctor = sub.add_parser("doctor", help="Validate project, toolchain, and Astra Support readiness")
     p_doctor.add_argument("--project", "-C", default=".", help="Target project path")
     p_doctor.add_argument("--config", help="Optional path to .astra-support.yml")
-    p_doctor.set_defaults(func=doctor_cmd.run)
+    p_doctor.set_defaults(func=_run_doctor)
 
     p_sync = sub.add_parser("sync", help="Write or refresh support-managed project files")
     p_sync.add_argument("--project", "-C", default=".", help="Target project path")
@@ -42,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="git+https://github.com/Terrapin-Rocket-Team/Astra-Support.git@main",
         help="pip/pipx install spec written into generated workflow",
     )
-    p_sync.set_defaults(func=sync_cmd.run)
+    p_sync.set_defaults(func=_run_sync)
 
     p_test = sub.add_parser("test", help="Run managed PlatformIO clean/build/test flows")
     p_test.add_argument("--project", "-C", default=".", help="Target project path")
@@ -53,7 +82,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_test.add_argument("--no-builds", "-B", action="store_true")
     p_test.add_argument("--no-tests", "-T", action="store_true")
     p_test.add_argument("--clean", "-c", action="store_true")
-    p_test.set_defaults(func=test_cmd.run)
+    p_test.add_argument("--update-deps", action="store_true", help="Update dependencies before building")
+    p_test.add_argument("--jobs", "-j", type=_positive_int, help="Maximum parallel build/test workers")
+    p_test.set_defaults(func=_run_test)
 
     p_sim = sub.add_parser("sim", help="Simulation utilities")
     p_sim_sub = p_sim.add_subparsers(dest="sim_command", required=True)
@@ -61,7 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sim_list = p_sim_sub.add_parser("list", help="List available bundled, local, and custom sim sources")
     p_sim_list.add_argument("--project", "-C", default=".", help="Target project path")
     p_sim_list.add_argument("--config", help="Optional path to .astra-support.yml")
-    p_sim_list.set_defaults(func=sim_cmd.list_sources)
+    p_sim_list.set_defaults(func=_list_sim_sources)
 
     p_sim_run = p_sim_sub.add_parser("run", help="Run the simulation harness")
     p_sim_run.add_argument("--project", "-C", default=".", help="Target project path")
@@ -93,7 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sim_run.add_argument("--time-scale", type=float, default=1.0, help="Real-time pacing scale factor")
     p_sim_run.add_argument("--dataset-root", action="append", help="Additional dataset roots")
     p_sim_run.add_argument("--no-plot", action="store_true", help="Skip result plotting")
-    p_sim_run.set_defaults(func=sim_cmd.run)
+    p_sim_run.set_defaults(func=_run_sim)
 
     p_init = sub.add_parser("init", help="Compatibility alias for sync")
     p_init.add_argument("--project", "-C", default=".", help="Target project path")
@@ -108,7 +139,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="git+https://github.com/Terrapin-Rocket-Team/Astra-Support.git@main",
         help="pip/pipx install spec written into generated workflow",
     )
-    p_init.set_defaults(func=sync_cmd.run)
+    p_init.set_defaults(func=_run_sync)
 
     p_sitl = sub.add_parser("sitl", help="Compatibility alias for 'sim run --mode sitl'")
     p_sitl.add_argument("--project", "-C", default=".", help="Target project path")
@@ -173,7 +204,7 @@ def _compat_sitl(args) -> int:
         real_time=False,
         time_scale=1.0,
     )
-    return sim_cmd.run(compat_args)
+    return _run_sim(compat_args)
 
 
 def _compat_hitl(args) -> int:
@@ -188,10 +219,11 @@ def _compat_hitl(args) -> int:
         sitl_log=None,
         build=False,
     )
-    return sim_cmd.run(compat_args)
+    return _run_sim(compat_args)
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_console_output()
     try:
         parser = build_parser()
         args = parser.parse_args(argv)
@@ -199,6 +231,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         return int(args.func(args))
     except KeyboardInterrupt:
-        configure_console_output()
-        print(paint("Interrupted by user.", Ansi.YELLOW))
+        safe_print(paint("Interrupted by user.", Ansi.YELLOW))
         return 130
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        safe_print(paint(f"Error: {exc}", Ansi.RED))
+        return 1

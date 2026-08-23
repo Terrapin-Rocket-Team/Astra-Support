@@ -17,7 +17,7 @@ def run_parallel_with_retries(
     max_workers: int,
     max_retries: int,
     should_retry: Callable[[ResultT], bool],
-    on_retry: Callable[[ItemT, int], None] | None = None,
+    on_retry: Callable[[ItemT, int, ResultT], None] | None = None,
     on_result: Callable[[ItemT, ResultT], None] | None = None,
 ) -> list[ResultT]:
     pending = deque(items)
@@ -37,7 +37,7 @@ def run_parallel_with_retries(
                 if should_retry(result) and retries[item] < max_retries:
                     retries[item] += 1
                     if on_retry:
-                        on_retry(item, retries[item])
+                        on_retry(item, retries[item], result)
                     time.sleep(min(0.2 * retries[item], 1.0))
                     pending.append(item)
                     continue

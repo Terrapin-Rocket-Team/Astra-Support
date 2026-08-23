@@ -88,6 +88,7 @@ def _run_git_command(args: list[str], *, cwd: Path | None = None, timeout: int =
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         text=True,
+        errors="replace",
         timeout=timeout,
         check=False,
         cwd=cwd,
@@ -205,6 +206,7 @@ def _check_pypi_install(current: str) -> Optional[UpdateInfo]:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
+            errors="replace",
             timeout=8,
             check=False,
         )
